@@ -20,11 +20,31 @@ def root_dir() -> Path:
     return lumio_session.storage_dir() / SNAPSHOT_DIRNAME
 
 
+def _canonical(folder) -> str:
+    r"""Forme canonique d'un dossier, pour comparer deux chemins sans faux négatif.
+
+    Un même dossier peut s'écrire ``...\sub\..``, avec des majuscules, ou via un
+    nom court 8.3 : ``resolve()`` les ramène tous à la même chaîne.
+    """
+    text = str(folder or "")
+    try:
+        return str(Path(text).resolve()).casefold()
+    except (OSError, RuntimeError):
+        return text.casefold()
+
+
+def _resolve_folder(folder) -> Path:
+    path = Path(folder)
+    try:
+        return path.resolve()
+    except (OSError, RuntimeError):
+        return path.absolute()
+
+
 def _folder_key(folder) -> str:
     import hashlib
 
-    text = str(Path(folder).resolve()).casefold()
-    return hashlib.sha1(text.encode("utf-8")).hexdigest()[:16]
+    return hashlib.sha1(_canonical(folder).encode("utf-8")).hexdigest()[:16]
 
 
 def _index_path() -> Path:
@@ -34,7 +54,7 @@ def _index_path() -> Path:
 def snapshot(folder, relative: str, content, reason: str = "write") -> dict | None:
     """Enregistre la version courante d'un fichier. Retourne l'entrée créée."""
     text = string_or_none(content)
-    folder = Path(folder)
+    folder = _resolve_folder(folder)
     relative = Path(str(relative)).as_posix()
     if text is None:
         return None
@@ -77,7 +97,7 @@ def entries(folder=None, relative=None, limit=200) -> list:
     path = _index_path()
     if not path.is_file():
         return []
-    wanted_folder = str(Path(folder).resolve()).casefold() if folder else None
+    wanted_folder = _canonical(folder) if folder else None
     wanted_rel = Path(str(relative)).as_posix().casefold() if relative else None
     rows = []
     try:
@@ -91,7 +111,7 @@ def entries(folder=None, relative=None, limit=200) -> list:
                 continue
             if not isinstance(item, dict):
                 continue
-            if wanted_folder and str(item.get("folder") or "").casefold() != wanted_folder:
+            if wanted_folder and _canonical(item.get("folder")) != wanted_folder:
                 continue
             if wanted_rel and str(item.get("relative") or "").casefold() != wanted_rel:
                 continue

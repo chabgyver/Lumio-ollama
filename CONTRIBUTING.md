@@ -7,7 +7,7 @@ lourdes : interface en CustomTkinter, moteur en bibliothèque standard.
 
 ```bat
 python -m pip install -r requirements.txt
-python tests\run_tests.py        doit afficher : Ran 151 tests ... OK
+python tests\run_tests.py        doit afficher : Ran 153 tests ... OK
 pythonw gui_tool.py
 ```
 

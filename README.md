@@ -124,7 +124,7 @@ garde-fous sont volontaires :
 python tests\run_tests.py
 ```
 
-151 tests, sans réseau ni GPU : moteur, session et chiffrement, recherche,
+153 tests, sans réseau ni GPU : moteur, session et chiffrement, recherche,
 coûts, instantanés, outils, classement, arborescence, vérification, routage.
 Ils tournent sur Windows (`windows-latest`) dans la CI GitHub Actions.
 

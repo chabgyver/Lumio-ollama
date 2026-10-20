@@ -1,5 +1,6 @@
 """Tests de lumio_snapshots : instantané, historique, restauration, purge."""
 
+import json
 import sys
 import tempfile
 import unittest
@@ -67,6 +68,27 @@ class InstantaneTests(unittest.TestCase):
         entry = {"folder": str(self.folder), "relative": "../evasion.txt", "file": ""}
         with self.assertRaises(Exception):
             lsn.restore(entry)
+
+    def test_dossier_non_canonique(self):
+        """Même dossier écrit autrement : les instantanés doivent se retrouver."""
+        odd = self.folder / "sous-dossier" / ".."
+        entry = lsn.snapshot(odd, "a.py", "v1")
+        self.assertIsNotNone(entry)
+        rows = lsn.entries(folder=self.folder, relative="a.py")
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(lsn.files_with_history(self.folder)[0]["relative"], "a.py")
+
+    def test_ancienne_entree_avec_chemin_brut(self):
+        """Une entrée écrite avant la canonicalisation reste lisible."""
+        entry = lsn.snapshot(self.folder, "a.py", "v1")
+        self.assertIsNotNone(entry)
+        index = lsn.root_dir() / "index.jsonl"
+        lines = index.read_text(encoding="utf-8").splitlines()
+        item = json.loads(lines[0])
+        item["folder"] = str(self.folder) + "\\."
+        index.write_text(json.dumps(item) + "\n", encoding="utf-8")
+        self.assertEqual(len(lsn.entries(folder=self.folder, relative="a.py")), 1)
+
 
 
 if __name__ == "__main__":
