@@ -1,0 +1,26 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyd
+.venv/
+venv/
+env/
+
+# Données locales : jamais dans le dépôt
+session.json
+session.bak.json
+settings.json
+usage.jsonl
+snapshots/
+*.log
+
+# Sauvegardes de travail
+*.bak-*
+*.pro-*
+*.orig
+*.rej
+
+# Système
+Thumbs.db
+desktop.ini
+.DS_Store

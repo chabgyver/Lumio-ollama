@@ -1,0 +1,6 @@
+# Interface graphique et capture d'écran
+customtkinter>=5.2.0
+Pillow>=10.0.0
+
+# Glisser-déposer (facultatif : Lumio démarre sans)
+tkinterdnd2>=0.3.0
