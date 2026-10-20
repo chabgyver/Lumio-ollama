@@ -94,5 +94,24 @@ class DetectionTests(unittest.TestCase):
         self.assertTrue(any("py_compile" in item for item in commands))
 
 
+
+class CacheTests(unittest.TestCase):
+    def test_purge_pycache(self):
+        """Un __pycache__ périmé ne doit pas survivre à une vérification."""
+        folder = Path(tempfile.mkdtemp(prefix="lumio_cache_"))
+        cache = folder / "sous" / "__pycache__"
+        cache.mkdir(parents=True)
+        (cache / "calc.cpython-313.pyc").write_bytes(b"perime")
+        (folder / "calc.py").write_text("x = 1\n", encoding="utf-8")
+        self.assertEqual(lv._purge_pycache(folder), 1)
+        self.assertFalse(cache.exists())
+        self.assertTrue((folder / "calc.py").is_file())
+
+    def test_commande_python_reconnue(self):
+        self.assertTrue(lv._is_python("python check.py"))
+        self.assertTrue(lv._is_python('py -3 tests/run_tests.py'))
+        self.assertTrue(lv._is_python("python -m pytest -q"))
+        self.assertFalse(lv._is_python("npm test"))
+        self.assertFalse(lv._is_python("node index.js"))
 if __name__ == "__main__":
     unittest.main()

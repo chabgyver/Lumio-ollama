@@ -97,7 +97,7 @@ affichée dans une boîte de dialogue.
 python tests\run_tests.py
 ```
 
-118 tests, aucune dépendance : moteur, session/chiffrement, recherche, coûts,
+155 tests, aucune dépendance : moteur, session/chiffrement, recherche, coûts,
 instantanés, outils, routage, vérification.
 
 ## Modules

@@ -13,6 +13,7 @@ Principes :
 import locale
 import os
 import re
+import shutil
 import subprocess
 import time
 from pathlib import Path
@@ -83,6 +84,31 @@ def _decode(raw: bytes) -> str:
     return raw.decode("utf-8", errors="replace")
 
 
+def _is_python(command: str) -> bool:
+    """Vrai si la commande lance un interpréteur Python."""
+    first = str(bare_command(command) or "").strip().split(" ")[0].casefold()
+    return first in {"python", "python3", "python.exe", "py", "pytest"} or first.startswith("python")
+
+
+def _purge_pycache(root: Path, limit: int = 50) -> int:
+    """Supprime les __pycache__ du dossier avant une vérification Python.
+
+    Sur un partage réseau, deux versions de même taille écrites dans la même
+    seconde partagent leur date : Python réutilise alors l'ancien .pyc et le
+    test valide un code qui n'existe plus. On repart donc d'un cache propre.
+    """
+    removed = 0
+    try:
+        for path in root.rglob("__pycache__"):
+            if removed >= limit:
+                break
+            shutil.rmtree(path, ignore_errors=True)
+            removed += 1
+    except OSError:
+        pass
+    return removed
+
+
 def run_command(command: str, folder, timeout: int = 300, allowlist=None, denylist=None):
     """Exécute une commande autorisée et renvoie son résultat détaillé."""
     ok, reason = command_is_safe(command, allowlist, denylist)
@@ -98,6 +124,9 @@ def run_command(command: str, folder, timeout: int = 300, allowlist=None, denyli
             "ok": False, "allowed": True, "reason": "dossier introuvable", "command": command,
             "exit": None, "stdout": "", "stderr": "", "duration": 0.0,
         }
+
+    if _is_python(command):
+        _purge_pycache(root)
 
     limit = max(5, min(int(timeout or 300), TIMEOUT_MAX))
     started = time.time()

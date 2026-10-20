@@ -2,7 +2,7 @@
 
 **Assistant de bureau pour travailler sur un dossier avec un modèle local : il lit, modifie et — surtout — vérifie ce qu'il produit.**
 
-![Interface de Lumio](docs/screenshot.png)
+![Démo : vérifier, corriger, revérifier](docs/demo.gif)
 
 `Licence MIT` · `Python 3.11+` · `Windows 10/11`
 
@@ -23,6 +23,19 @@ La plupart des assistants s'arrêtent quand ils ont écrit du code. Lumio
 5. il recommence, dans une limite que tu fixes.
 
 Chaque écriture est archivée : on peut revenir à la version précédente.
+
+## Démo en deux minutes
+
+Le dossier [`exemple/`](exemple) contient un fichier volontairement faux
+(`calc.py` : la somme soustrait au lieu d'additionner) et son test.
+
+1. **Parcourir** → choisis `exemple/`.
+2. *Réglages* (`Ctrl+K`) → commande de vérification : `python check.py`.
+3. Clique **Vérifier** : le test échoue, l'erreur s'affiche.
+4. Demande « Le test check.py échoue. Corrige calc.py. »
+5. Accepte le diff : la vérification repasse au vert toute seule.
+
+![Interface complète](docs/screenshot.png)
 
 ## Fonctionnalités
 
@@ -77,7 +90,8 @@ commandes dans le dossier.
 | Réglage | Effet |
 |---|---|
 | Vérifier automatiquement | exécute la commande de vérification après chaque écriture |
-| Commande de vérification | vide = détection (`tests/run_tests.py`, pytest, `npm test`, sinon `py_compile`) |
+| Commande de vérification | vide = détection (`tests/run_tests.py`, pytest, 
+pm test`, sinon `py_compile`) |
 | Tentatives de correction | nombre de reprises automatiques (0-5, défaut 2) |
 | Appliquer sans clic | écrit les fichiers sans confirmation, borné en fichiers et en octets |
 | Budget $ par question | stoppe les reprises automatiques au-delà du montant |
@@ -124,7 +138,7 @@ garde-fous sont volontaires :
 python tests\run_tests.py
 ```
 
-153 tests, sans réseau ni GPU : moteur, session et chiffrement, recherche,
+155 tests, sans réseau ni GPU : moteur, session et chiffrement, recherche,
 coûts, instantanés, outils, classement, arborescence, vérification, routage.
 Ils tournent sur Windows (`windows-latest`) dans la CI GitHub Actions.
 
