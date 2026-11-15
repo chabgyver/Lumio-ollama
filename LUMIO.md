@@ -12,6 +12,8 @@ s'il est présent, puis l'interface. Une seule instance à la fois.
 |---|---|
 | Discuter d'un dossier (fichiers cochés = contexte) | fenêtre principale |
 | Choisir / installer un modèle local | bouton du modèle → *Modèles* |
+| Filtrer libres / abliterated / obliterated | *Modèles* → **Tous · Uncensored · Abliterated · Obliterated** |
+| Utiliser un modèle gratuit sans téléchargement | moteur **AI Horde** (modèles communautaires, abliterated inclus) |
 | Chercher un modèle en ligne (470 modèles, tarifs, gratuits) | *Modèles* → **Catalogue en ligne** |
 | Trier ces modèles (recommandé, puissance, prix, contexte, date) | Catalogue → **Trier par** |
 | Vérifier le code produit (boucle agent) | barre d'actions → **Vérifier** |
@@ -44,6 +46,21 @@ dépendre de ta sélection.
 enchaînements (`&&`, `|`, `>`, `;`) et les motifs destructeurs sont toujours
 refusés.
 
+## Réglages du modèle local
+
+Deux réglages, `Ctrl+K` → **Réglages**, section *Modèle local (Ollama)* :
+
+- **Désactiver la réflexion** — envoie `think: false` aux modèles qui
+  réfléchissent avant de répondre (LFM3, Qwen3…). Sur une petite carte, le
+  raisonnement coûte souvent plus de temps que la réponse : mesuré sur une
+  GTX 980M avec LFM3-1.7B, 7,7 s contre 16,0 s pour la même question, réponse
+  équivalente. Seuls les modèles qui annoncent la capacité `thinking` reçoivent
+  le paramètre ; les autres ne voient aucune différence.
+- **Plafond de contexte** (caractères, 0 = celui du modèle) — un modèle qui
+  annonce 262k de fenêtre fait envoyer jusqu'à 200 000 caractères. Sur une carte
+  de 4 Go, cela sature le prefill : le plafond borne l'envoi. Le minimum reste
+  4 000 caractères, pour qu'un fichier entier passe toujours.
+
 
 ## Classement du catalogue
 
@@ -55,6 +72,71 @@ modèle quand elle y figure.
 Aucune API publique ne fournit de benchmark : la « puissance » est une
 **estimation** (taille en paramètres, sinon prix d'entrée comme proxy). C'est un
 ordre de grandeur pour t'aider à choisir, pas une mesure.
+
+## Uncensored, abliterated, obliterated
+
+Trois mots différents, souvent confondus :
+
+| Terme | Ce que c'est | Ce que ça change |
+|---|---|---|
+| **Uncensored** | terme générique : tout modèle qui refuse moins. Le plus souvent un **fine-tune** (Dolphin, Venice, Magnum…) ou un modèle RP entraîné sans filtre. | il répond là où l'original refusait, mais le refus peut rester : il faut parfois encore insister |
+| **Abliterated** | modèle dont la **direction de refus a été retirée des poids** (abliteration, Heretic), sans réentraînement. | le refus tombe au niveau des poids et pas seulement en surface ; les capacités sont en général conservées |
+| **Obliterated** | abliteration **poussée** : plusieurs directions, davantage de couches, contrôle de cohérence (OBLITERATUS et pipelines équivalents). | quasi plus aucun refus, même sur les demandes les plus dures — mais cohérence, suivi d'instructions et code se dégradent souvent |
+
+Autrement dit : *uncensored* décrit un comportement, *abliterated* et
+*obliterated* décrivent la méthode — et l'obliterated est l'abliterated en plus
+agressif.
+
+Dans *Modèles*, quatre boutons filtrent la liste :
+
+- **Tous** — tout ce que le moteur propose ;
+- **Uncensored** — aucun filtre intégré (fine-tunes, RP, abliterated, obliterated) ;
+- **Abliterated** — refus retiré des poids, **obliterated inclus** ;
+- **Obliterated** — uniquement les modèles à abliteration lourde.
+
+Le compteur au-dessus de la liste donne la répartition
+(`1 obliterated · 1 abliterated · 1 uncensored · 2 alignés`), chaque ligne peut
+porter son étiquette, et le filtre choisi est mémorisé. Le catalogue en ligne
+affiche la même étiquette sur les modèles concernés.
+
+Les noms sont reconnus par mot-clé (`obliterat`, `liberated`, `abliterat`,
+`heretic`, `dolphin`, `uncensored`…). Un modèle renommé à la main échappe donc à
+la détection : il reste visible dans **Tous**.
+
+## AI Horde : gratuit, sans rien télécharger
+
+Les modèles abliterated ne sont proposés ni par les routeurs commerciaux
+(OpenRouter n'en a **aucun** sur 464 modèles) ni par leurs offres gratuites :
+ils vivent en GGUF chez des particuliers. **AI Horde** est le service gratuit
+qui les sert — un réseau bénévole de machines qui prennent les demandes en file
+d'attente.
+
+Moteur **AI Horde** dans la barre du bas, puis *Choisir un modèle* :
+
+- la liste vient de `/status/models` : modèles réellement servis à cet instant,
+  triés du plus libre au plus aligné (abliterated et obliterated en tête) ;
+- les quatre filtres **Tous · Uncensored · Abliterated · Obliterated** s'y
+  appliquent comme en local ;
+- **aucune clé n'est nécessaire** : Lumio utilise la clé anonyme et passe après
+  les autres. Une clé gratuite ([aihorde.net/register](https://aihorde.net/register))
+  donne la priorité : bouton **Clé**, elle est chiffrée par le DPAPI.
+
+Ce qui change par rapport à un modèle local :
+
+| | AI Horde | Local (Ollama) |
+|---|---|---|
+| Coût | gratuit | gratuit |
+| Attente | file d'attente (secondes à minutes) | immédiat |
+| Flux | non : la réponse arrive d'un coup | oui, mot à mot |
+| Contexte | court (~4 000 tokens, fichiers tronqués) | fenêtre du modèle |
+| Captures | non envoyées | oui, selon le modèle |
+| Confidentialité | passe sur le GPU de bénévoles | reste sur la machine |
+
+Lumio coupe le prompt au milieu quand il est trop long : les consignes du début
+et la question finale sont conservées. Pour un dossier volumineux, préfère un
+modèle local ou en ligne ; AI Horde sert aux questions courtes et aux modèles
+qu'on ne peut pas faire tourner chez soi.
+
 ## Arborescence du dossier
 
 Le panneau **FICHIERS** affiche le dossier en arborescence : dossiers dépliables
@@ -97,15 +179,15 @@ affichée dans une boîte de dialogue.
 python tests\run_tests.py
 ```
 
-155 tests, aucune dépendance : moteur, session/chiffrement, recherche, coûts,
-instantanés, outils, routage, vérification.
+212 tests, aucune dépendance : moteur, session/chiffrement, recherche, coûts,
+instantanés, outils, routage, vérification, prompt et file d'attente AI Horde.
 
 ## Modules
 
 | Module | Rôle |
 |---|---|
 | `gui_tool.py` | interface (Tkinter / CustomTkinter) |
-| `ollama_fs_access.py` | moteur : fichiers, contexte, flux Ollama / OpenAI / PrivateGPT, catalogue |
+| `ollama_fs_access.py` | moteur : fichiers, contexte, flux Ollama / OpenAI / PrivateGPT / AI Horde, catalogue |
 | `lumio_session.py` | session, chiffrement DPAPI, migration |
 | `lumio_search.py` | recherche dans les conversations |
 | `lumio_cost.py` | tokens, coût, journal, budgets |

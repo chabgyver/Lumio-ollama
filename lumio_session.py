@@ -24,7 +24,7 @@ from pathlib import Path
 APP_DIR = Path(__file__).resolve().parent
 SECRET_PREFIX = "dpapi:"
 PLAIN_PREFIX = "plain:"
-SECRET_FIELDS = ("online_key",)
+SECRET_FIELDS = ("online_key", "horde_key")
 SECRET_MAPS = ("catalog_keys",)
 
 

@@ -9,6 +9,7 @@ import threading
 import time
 import tkinter as tk
 import traceback
+import webbrowser
 from datetime import datetime
 from pathlib import Path
 from tkinter import filedialog, messagebox
@@ -78,6 +79,8 @@ DEFAULT_SETTINGS = {
     "auto_apply_max_files": 2,
     "auto_apply_max_bytes": 60000,
     "catalog_sort": "recommande",
+    "think_off": False,
+    "context_cap": 0,
 }
 
 
@@ -364,6 +367,7 @@ class FileSystemWrapper(_WindowBase):
             "ollama": str(saved.get("ollama_model") or (saved.get("model") if self.provider == "ollama" else "") or ""),
             "pgpt": str(saved.get("pgpt_model") or ""),
             "online": str(saved.get("online_model") or ""),
+            "horde": str(saved.get("horde_model") or ""),
         }
         if ollama_fs_access.looks_like_ollama_model(self._model_by_provider["online"]):
             self._model_by_provider["online"] = ""
@@ -374,16 +378,21 @@ class FileSystemWrapper(_WindowBase):
             saved.get("online_key") or "",
             saved.get("online_preset") or "",
         )
+        ollama_fs_access.configure_horde(saved.get("horde_key") or "")
         ollama_fs_access.configure_catalog_keys(saved.get("catalog_keys") or {})
         self.catalog_source = ollama_fs_access.catalog_key(saved.get("catalog_source") or "openrouter")
         self._catalog_choice = str(saved.get("catalog_model") or "").strip()
         self._online_warned = False
+        self._horde_warned = False
         self._all_models = []
         self._models_error = ""
         self._filling_models = False
         self._model_picker = None
         self._model_picker_list = None
-        self.model_filter = "uncensored"
+        self.model_filter = ollama_fs_access.normalize_model_filter(
+            saved.get("model_filter") if saved.get("model_filter_custom") else ""
+        )
+        self._filter_custom = bool(saved.get("model_filter_custom"))
         self.model_family = str(saved.get("model_family") or "")
         self.model_var = tk.StringVar(value=self._model_by_provider.get(self.provider) or "")
         self.recent_folders = _recent_folders(saved.get("recent_folders"), self.target_folder)
@@ -628,7 +637,7 @@ class FileSystemWrapper(_WindowBase):
         controls.grid(row=3, column=0, columnspan=3, sticky="ew", pady=(8, 0))
         self.provider_box = self._styled(
             ctk.CTkComboBox(
-                controls, values=["Ollama", "PrivateGPT", "En ligne"], width=150, height=36, corner_radius=10,
+                controls, values=["Ollama", "PrivateGPT", "En ligne", "AI Horde"], width=150, height=36, corner_radius=10,
                 font=self.font_small, command=self._on_provider,
             ),
             "combo",
@@ -639,7 +648,10 @@ class FileSystemWrapper(_WindowBase):
             controls, "Chargement…  ▾", self.pick_model, width=280,
         )
         self.model_button.pack(side="left", padx=(8, 0))
-        self._button(controls, "API", self.edit_online_api, width=56).pack(side="left", padx=(8, 0))
+        self.api_button = self._button(controls, "API", self.edit_api_key, width=56)
+        self.api_button.pack(side="left", padx=(8, 0))
+        if self._backend() == "horde":
+            self.api_button.configure(text="Clé")
         self.cancel_button = self._button(controls, "Annuler", self.cancel_ask, danger=True)
         self.cancel_button.pack(side="right")
         self.continue_button = self._button(controls, "Continuer", self.continue_reply)
@@ -738,6 +750,14 @@ class FileSystemWrapper(_WindowBase):
 
     def _styled(self, widget, role):
         self._themed.append((widget, role))
+        self._paint(widget, role)
+        return widget
+
+    def _role(self, widget, role):
+        """Change le rôle d'un widget déjà stylé (thème et surbrillance suivent)."""
+        self._themed = [
+            (item, role if item is widget else old) for item, old in self._themed
+        ]
         self._paint(widget, role)
         return widget
 
@@ -931,6 +951,9 @@ class FileSystemWrapper(_WindowBase):
         self.provider = key
         self.model_var.set(self._model_by_provider.get(key) or "")
         self._set_status(f"Moteur : {self._backend_name()}")
+        button = getattr(self, "api_button", None)
+        if button is not None:
+            button.configure(text="Clé" if key == "horde" else "API")
         if key == "online" and not ollama_fs_access.online_config().get("key"):
             self.after(80, self.edit_online_api)
         self.refresh_models()
@@ -956,7 +979,9 @@ class FileSystemWrapper(_WindowBase):
         button.configure(text=self._model_button_label())
 
     def _visible_models(self, needle=""):
-        names = list(self._all_models)
+        names = ollama_fs_access.filter_models(
+            self._all_models, kind=getattr(self, "model_filter", "all")
+        )
         if self._backend() == "online":
             names = [name for name in names if not ollama_fs_access.is_weak_coder(name)]
         needle = str(needle or "").strip().casefold()
@@ -976,8 +1001,13 @@ class FileSystemWrapper(_WindowBase):
         return rows
 
     def _on_model_filter(self, kind):
-        self.model_filter = "uncensored"
-        self._apply_model_list()
+        self.model_filter = ollama_fs_access.normalize_model_filter(kind)
+        self._filter_custom = True
+        picker = getattr(self, "_model_picker", None)
+        fill = getattr(picker, "_fill_models", None) if picker is not None else None
+        if callable(fill):
+            fill()
+        self._save_session()
 
     def _on_model(self, choice, force=False):
         choice = str(choice or "").strip()
@@ -1002,16 +1032,20 @@ class FileSystemWrapper(_WindowBase):
             extra = f" · {window}" if window else ""
         elif self._backend() == "online":
             extra = " · En ligne"
+        elif self._backend() == "horde":
+            extra = " · AI Horde"
         elif self._backend() == "pgpt":
             extra = " · PrivateGPT"
         if getattr(self, "ollama_state", None) is not None:
             tag = ollama_fs_access.model_coding_tag(choice)
+            level = ollama_fs_access.freedom_level(choice)
+            note = f" · {level}" if level == "obliterated" else ""
             if tag and "pas pour le code" in tag:
                 self._paint(self.ollama_state, "danger")
-                self.ollama_state.configure(text=f"·  {tag}{extra}")
+                self.ollama_state.configure(text=f"·  {tag}{extra}{note}")
             else:
                 self._paint(self.ollama_state, "sage")
-                self.ollama_state.configure(text=f"·  prêt{extra}")
+                self.ollama_state.configure(text=f"·  prêt{extra}{note}")
         self._save_session()
 
     def pick_model(self):
@@ -1019,8 +1053,8 @@ class FileSystemWrapper(_WindowBase):
             self.refresh_models()
         dialog = ctk.CTkToplevel(self)
         dialog.title("Modèles")
-        dialog.geometry("640x580")
-        dialog.minsize(480, 400)
+        dialog.geometry("660x600")
+        dialog.minsize(560, 420)
         dialog.configure(fg_color=self.C("bg"))
         dialog.transient(self)
         try:
@@ -1033,6 +1067,8 @@ class FileSystemWrapper(_WindowBase):
             if self._backend() == "pgpt"
             else "Uniquement les modèles uncensored capables de coder (Dolphin 24B, Magnum, Euryale…)."
             if self._backend() == "online"
+            else "Modèles communautaires AI Horde : gratuits, en file d'attente, sans téléchargement."
+            if self._backend() == "horde"
             else "Tous les modèles Ollama installés localement."
         )
         self._styled(
@@ -1056,6 +1092,34 @@ class FileSystemWrapper(_WindowBase):
         search.pack(side="left", fill="x", expand=True)
         self._button(tools, "Actualiser", self.refresh_models, width=100).pack(side="left", padx=(8, 0))
         self._button(tools, "Catalogue en ligne", self.browse_catalog, width=160).pack(side="left", padx=(8, 0))
+
+        filter_row = ctk.CTkFrame(dialog, fg_color="transparent")
+        filter_row.pack(fill="x", padx=16, pady=(8, 0))
+        filter_buttons = {}
+
+        def paint_filters():
+            for token, button in filter_buttons.items():
+                self._role(button, "btn_primary" if token == self.model_filter else "btn")
+
+        def set_filter(kind):
+            self._on_model_filter(kind)
+            paint_filters()
+
+        for token, label in ollama_fs_access.MODEL_FILTERS:
+            button = self._button(
+                filter_row, label, lambda item=token: set_filter(item), width=118,
+            )
+            button.pack(side="left", padx=(0, 6))
+            filter_buttons[token] = button
+        paint_filters()
+        filter_hint = self._styled(
+            ctk.CTkLabel(
+                dialog, text="", font=self.font_tiny, anchor="w", justify="left",
+                wraplength=600,
+            ),
+            "muted",
+        )
+        filter_hint.pack(fill="x", padx=16, pady=(6, 0))
         count = self._styled(ctk.CTkLabel(dialog, text="", font=self.font_tiny, anchor="w"), "muted")
         count.pack(fill="x", padx=16, pady=(8, 4))
         listing = self._styled(ctk.CTkScrollableFrame(dialog, corner_radius=12), "well")
@@ -1071,6 +1135,11 @@ class FileSystemWrapper(_WindowBase):
         def fill():
             for child in listing.winfo_children():
                 child.destroy()
+            summary = ollama_fs_access.freedom_summary(
+                ollama_fs_access.freedom_counts(self._all_models)
+            )
+            label_hint = ollama_fs_access.model_filter_hint(self.model_filter)
+            filter_hint.configure(text=f"{label_hint}  {summary}".strip())
             if not self._all_models:
                 text = self._models_error or "Chargement des modèles…"
                 self._styled(ctk.CTkLabel(listing, text=text, font=self.font_small, anchor="w"), "muted").pack(
@@ -1083,7 +1152,10 @@ class FileSystemWrapper(_WindowBase):
                 empty = (
                     "Aucun modèle PrivateGPT. Lancez le workbench puis Actualiser."
                     if self._backend() == "pgpt"
-                    else "Aucun modèle uncensored trouvé. Cliquez sur Actualiser."
+                    else (
+                        f"Aucun modèle « {ollama_fs_access.model_filter_label(self.model_filter)} » "
+                        "dans cette liste : choisissez « Tous » ou Actualisez."
+                    )
                 )
                 self._styled(
                     ctk.CTkLabel(
@@ -1093,16 +1165,25 @@ class FileSystemWrapper(_WindowBase):
                     ),
                     "muted",
                 ).pack(fill="x", padx=8, pady=12)
-                count.configure(text="0 modèle")
+                count.configure(text=f"0 modèle sur {len(self._all_models)}")
                 return
-            count.configure(text=f"{len(names)} modèle{'s' if len(names) != 1 else ''}")
+            count.configure(
+                text=(
+                    f"{len(names)} modèle{'s' if len(names) != 1 else ''} "
+                    f"sur {len(self._all_models)}"
+                )
+            )
             current = self._current_model()
             for name in names:
                 mark = "●  " if name == current else ""
-                tag = ollama_fs_access.model_coding_tag(name)
+                bits = [ollama_fs_access.model_coding_tag(name)]
+                level = ollama_fs_access.freedom_level(name)
+                if level in {"obliterated", "abliterated"}:
+                    bits.append(level)
                 label = f"{mark}{name}"
-                if tag:
-                    label = f"{label}   ·   {tag}"
+                detail = "   ·   ".join(bit for bit in bits if bit)
+                if detail:
+                    label = f"{label}   ·   {detail}"
                 self._button(
                     listing, label,
                     lambda item=name: choose(item),
@@ -1354,6 +1435,11 @@ class FileSystemWrapper(_WindowBase):
                     bits.append("vision")
                 if row["tools"]:
                     bits.append("tools")
+                level = ollama_fs_access.freedom_level(
+                    row["id"], row.get("description") or ""
+                )
+                if level in {"obliterated", "abliterated"}:
+                    bits.append(level)
                 self._styled(
                     ctk.CTkLabel(
                         body, text="  ·  ".join(bit for bit in bits if bit),
@@ -1489,6 +1575,89 @@ class FileSystemWrapper(_WindowBase):
         if secret:
             self.refresh_models()
         return True
+
+    def edit_api_key(self):
+        """Bouton API : clé du moteur courant (en ligne, ou AI Horde)."""
+        if self._backend() == "horde":
+            self.edit_horde_key()
+        else:
+            self.edit_online_api()
+
+    def edit_horde_key(self):
+        """Clé AI Horde : facultative, l'anonyme fonctionne déjà."""
+        cfg = ollama_fs_access.horde_config()
+        dialog = ctk.CTkToplevel(self)
+        dialog.title("Clé AI Horde")
+        dialog.geometry("560x400")
+        dialog.minsize(480, 340)
+        dialog.configure(fg_color=self.C("bg"))
+        dialog.transient(self)
+        try:
+            dialog.grab_set()
+        except Exception:
+            pass
+        ctk.CTkLabel(
+            dialog,
+            text="AI Horde",
+            text_color=self.C("text"), font=self.font_heading, anchor="w",
+        ).pack(fill="x", padx=18, pady=(16, 6))
+        self._styled(
+            ctk.CTkLabel(
+                dialog,
+                text=(
+                    "Modèles communautaires gratuits, sans téléchargement : la demande part "
+                    "dans une file d'attente et un worker bénévole la traite.\n\n"
+                    "La clé n'est pas obligatoire : sans clé, Lumio utilise la clé anonyme "
+                    "et passe après les autres. Une clé gratuite (compte aihorde.net) donne "
+                    "la priorité et un quota plus large.\n\n"
+                    "Les fichiers envoyés passent sur les GPU de bénévoles, pas chez un éditeur."
+                ),
+                font=self.font_tiny, anchor="w", justify="left", wraplength=500,
+            ),
+            "muted",
+        ).pack(fill="x", padx=18, pady=(0, 12))
+        self._styled(
+            ctk.CTkLabel(dialog, text="Clé (vide = clé anonyme)", font=self.font_tiny, anchor="w"),
+            "muted",
+        ).pack(fill="x", padx=18)
+        key_var = tk.StringVar(value=cfg.get("key") or "")
+        key_entry = self._styled(
+            ctk.CTkEntry(
+                dialog, textvariable=key_var, height=36, corner_radius=10,
+                font=self.font_small, show="•",
+                placeholder_text=ollama_fs_access.HORDE_ANON_KEY,
+            ),
+            "entry",
+        )
+        key_entry.pack(fill="x", padx=18, pady=(2, 8))
+
+        bar = ctk.CTkFrame(dialog, fg_color="transparent")
+        bar.pack(fill="x", padx=18, pady=16)
+
+        def open_register():
+            webbrowser.open("https://aihorde.net/register")
+
+        self._button(bar, "Obtenir une clé", open_register, width=150).pack(side="left")
+
+        def cancel():
+            dialog.destroy()
+
+        def save():
+            key = key_var.get().strip()
+            ollama_fs_access.configure_horde(key)
+            dialog.destroy()
+            self._save_session()
+            if self._backend() == "horde":
+                self.refresh_models()
+            self._set_status(
+                "Clé AI Horde enregistrée" if key else "AI Horde : clé anonyme"
+            )
+
+        self._button(bar, "Enregistrer", save, primary=True, width=130).pack(side="right")
+        self._button(bar, "Annuler", cancel, width=110).pack(side="right", padx=(0, 8))
+        dialog.bind("<Escape>", lambda _event: cancel())
+        dialog.bind("<Return>", lambda _event: save())
+        key_entry.focus_set()
 
     def edit_online_api(self):
         cfg = ollama_fs_access.online_config()
@@ -2170,7 +2339,8 @@ class FileSystemWrapper(_WindowBase):
             "Échap — arrêter\n"
             "F1 — cette aide\n"
             "API — clé pour un modèle en ligne (OpenRouter, DeepSeek…)\n"
-            "Clic sur le modèle — liste uncensored (Dolphin, Venice, MythoMax…)\n"
+            "Moteur AI Horde — modèles communautaires gratuits (file d'attente, sans clé)\n"
+            "Clic sur le modèle — liste filtrable : Tous, Uncensored, Abliterated, Obliterated\n"
             "Double-clic / clic droit — fichier",
         )
         return "break"
@@ -2189,7 +2359,9 @@ class FileSystemWrapper(_WindowBase):
             ("Moteur : Ollama", "", lambda: self._on_provider("Ollama")),
             ("Moteur : PrivateGPT", "", lambda: self._on_provider("PrivateGPT")),
             ("Moteur : En ligne", "", lambda: self._on_provider("En ligne")),
+            ("Moteur : AI Horde (gratuit, abliterated)", "", lambda: self._on_provider("AI Horde")),
             ("Clé API en ligne", "", self.edit_online_api),
+            ("Clé AI Horde", "", self.edit_horde_key),
             ("Changer de dossier…", "", self.choose_folder),
             ("Actualiser les modèles", "", self.refresh_models),
             ("Exporter la conversation", "Ctrl+E", self.export_chat),
@@ -2479,8 +2651,46 @@ class FileSystemWrapper(_WindowBase):
         ).pack(side="left", padx=(8, 0))
 
         self._styled(
+            ctk.CTkLabel(body, text="MODÈLE LOCAL (OLLAMA)", font=self.font_tiny, anchor="w"), "muted",
+        ).pack(fill="x", padx=6, pady=(6, 2))
+        think_var = tk.BooleanVar(value=bool(settings.get("think_off")))
+        self._styled(
+            ctk.CTkCheckBox(body, text="Désactiver la réflexion (réponse directe, beaucoup plus rapide)",
+                            variable=think_var, font=self.font_small,
+                            checkbox_width=18, checkbox_height=18),
+            "check",
+        ).pack(fill="x", padx=6, pady=(2, 2))
+        self._styled(
+            ctk.CTkLabel(
+                body,
+                text="Concerne les modèles qui réfléchissent avant de répondre (LFM3, Qwen3…). "
+                     "Sur une petite carte, le raisonnement coûte souvent plus de temps que la réponse.",
+                font=self.font_tiny, anchor="w", justify="left", wraplength=620,
+            ),
+            "muted",
+        ).pack(fill="x", padx=6, pady=(0, 6))
+        cap_row = ctk.CTkFrame(body, fg_color="transparent")
+        cap_row.pack(fill="x", padx=6, pady=(0, 4))
+        cap_var = tk.StringVar(value=str(settings.get("context_cap") or 0))
+        self._styled(ctk.CTkLabel(cap_row, text="Plafond de contexte (caractères, 0 = celui du modèle) :", font=self.font_small), "text").pack(side="left")
+        self._styled(
+            ctk.CTkEntry(cap_row, textvariable=cap_var, width=90, height=30, font=self.font_small),
+            "entry",
+        ).pack(side="left", padx=(8, 0))
+        self._styled(
+            ctk.CTkLabel(
+                body,
+                text="Utile pour un modèle qui annonce une très grande fenêtre (262k…) : "
+                     "sans plafond, Lumio peut envoyer 200 000 caractères et saturer une carte de 4 Go.",
+                font=self.font_tiny, anchor="w", justify="left", wraplength=620,
+            ),
+            "muted",
+        ).pack(fill="x", padx=6, pady=(0, 8))
+
+        self._styled(
             ctk.CTkLabel(body, text="OUTILS DU MODÈLE", font=self.font_tiny, anchor="w"), "muted",
         ).pack(fill="x", padx=6, pady=(6, 2))
+
         tools_var = tk.BooleanVar(value=bool(settings.get("tools_enabled")))
         self._styled(
             ctk.CTkCheckBox(body, text="Autoriser ```rechercher:``` et ```lire:``` (le modèle consulte le dossier)",
@@ -2559,6 +2769,10 @@ class FileSystemWrapper(_WindowBase):
                 max_bytes = max(0, int(bytes_var.get() or 0))
             except ValueError:
                 max_files, max_bytes = 2, 60000
+            try:
+                context_cap = max(0, int((cap_var.get() or "0").replace(" ", "")))
+            except ValueError:
+                context_cap = 0
             updated = dict(self.settings)
             updated.update({
                 "verify_command": command_var.get().strip(),
@@ -2568,6 +2782,8 @@ class FileSystemWrapper(_WindowBase):
                 "allowlist": allow or list(lumio_verify.DEFAULT_ALLOWLIST),
                 "tools_enabled": bool(tools_var.get()),
                 "tools_max_steps": int(settings.get("tools_max_steps") or 2),
+                "think_off": bool(think_var.get()),
+                "context_cap": context_cap,
                 "router_enabled": bool(router_var.get()),
                 "router_policy": label_to_key.get(policy_box.get(), "auto"),
                 "router_ceiling": ceiling,
@@ -2783,6 +2999,9 @@ class FileSystemWrapper(_WindowBase):
 
     def _route_question(self, question):
         if not self.settings.get("router_enabled"):
+            return
+        if self._backend() == "horde":
+            # AI Horde est un choix explicite (et gratuit) : le routage ne le remplace pas.
             return
         files = list(self._last_sent_files or [])[:40]
         context_chars = sum(int(self._disk_size.get(Path(item).as_posix()) or 0) for item in files)
@@ -3397,6 +3616,17 @@ class FileSystemWrapper(_WindowBase):
         key = Path(relative).as_posix()
         self._recent_files = [key] + [item for item in self._recent_files if item != key]
         self._recent_files = self._recent_files[:8]
+
+    def _think_pref(self):
+        """False = réflexion coupée ; None = comportement par défaut du modèle."""
+        return False if self.settings.get("think_off") else None
+
+    def _context_cap(self):
+        """Plafond de contexte en caractères (0 = celui du modèle)."""
+        try:
+            return max(0, int(self.settings.get("context_cap") or 0))
+        except (TypeError, ValueError):
+            return 0
 
     def _context_kwargs(self, question=""):
         return dict(
@@ -5003,7 +5233,7 @@ class FileSystemWrapper(_WindowBase):
         overrides = self._editor_overrides()
         context, _omitted, report = ollama_fs_access.build_context(
             self.target_folder, files, overrides,
-            char_limit=ollama_fs_access.context_budget(model),
+            char_limit=ollama_fs_access.context_budget(model, self._backend(), cap=self._context_cap()),
             **self._context_kwargs(self._pending_question),
         )
         self._last_sent_files = [item["path"] for item in report.get("sent") or []]
@@ -5048,6 +5278,7 @@ class FileSystemWrapper(_WindowBase):
                     on_thinking=lambda text: self._events.put(("thinking", text)),
                     on_stats=lambda text: self._events.put(("stats", text)),
                     provider=self._backend(),
+                    think=self._think_pref(),
                 )
                 self._events.put(("done", reply, self._cancel.is_set()))
             except Exception as error:
@@ -5306,6 +5537,12 @@ class FileSystemWrapper(_WindowBase):
                     "Ouvrez le workbench (http://127.0.0.1:8080/ui/), "
                     "attendez qu'il soit prêt, puis cliquez sur Choisir un modèle.",
                 )
+            elif self._backend() == "horde":
+                messagebox.showerror(
+                    APP_NAME,
+                    "AI Horde ne répond pas.\n\n"
+                    "Vérifiez votre connexion Internet, puis rouvrez « Choisir un modèle ».",
+                )
             else:
                 messagebox.showerror(
                     APP_NAME,
@@ -5325,6 +5562,13 @@ class FileSystemWrapper(_WindowBase):
                 "notice",
                 "Moteur en ligne : les fichiers envoyés quittent votre PC vers le serveur de l'API.",
             )
+        if self._backend() == "horde" and not self._horde_warned:
+            self._horde_warned = True
+            self._add_bubble(
+                "notice",
+                "AI Horde : les fichiers envoyés passent sur le GPU de bénévoles, "
+                "en file d'attente. Le contexte est coupé plus court qu'en local.",
+            )
         folder = self.target_folder
         history = list(self.history)
         skip_history = bool(ollama_fs_access.wants_gui(question) and history)
@@ -5333,7 +5577,7 @@ class FileSystemWrapper(_WindowBase):
         overrides = self._editor_overrides()
         context, omitted, report = ollama_fs_access.build_context(
             folder, files, overrides,
-            char_limit=ollama_fs_access.context_budget(model),
+            char_limit=ollama_fs_access.context_budget(model, self._backend(), cap=self._context_cap()),
             **self._context_kwargs(question),
         )
         if self.settings.get("tools_enabled"):
@@ -5398,6 +5642,7 @@ class FileSystemWrapper(_WindowBase):
                     on_thinking=lambda text: self._events.put(("thinking", text)),
                     on_stats=lambda text: self._events.put(("stats", text)),
                     provider=self._backend(),
+                    think=self._think_pref(),
                 )
                 self._events.put(("done", reply, self._cancel.is_set()))
             except Exception as error:
@@ -5466,6 +5711,7 @@ class FileSystemWrapper(_WindowBase):
                     on_thinking=lambda text: self._events.put(("thinking", text)),
                     on_stats=lambda text: self._events.put(("stats", text)),
                     provider=self._backend(),
+                    think=self._think_pref(),
                 )
                 self._events.put(("done", reply, self._cancel.is_set()))
             except Exception as error:
@@ -5534,6 +5780,8 @@ class FileSystemWrapper(_WindowBase):
                 extra = f" · {window}" if window else ""
             elif provider == "pgpt":
                 extra = " · PrivateGPT"
+            elif provider == "horde":
+                extra = " · AI Horde"
             else:
                 extra = " · En ligne"
             extra += f" · {len(names)} modèle{'s' if len(names) != 1 else ''}"
@@ -5550,7 +5798,12 @@ class FileSystemWrapper(_WindowBase):
             if self._models_error:
                 hint = "erreur modèles"
             elif not self._all_models:
-                hint = "clé API manquante" if provider == "online" and not ollama_fs_access.online_config().get("key") else f"{label} arrêté"
+                if provider == "online" and not ollama_fs_access.online_config().get("key"):
+                    hint = "clé API manquante"
+                elif provider == "horde":
+                    hint = "AI Horde injoignable"
+                else:
+                    hint = f"{label} arrêté"
             else:
                 hint = f"{label} arrêté"
             self.ollama_state.configure(text=f"·  {hint}")
@@ -5642,10 +5895,13 @@ class FileSystemWrapper(_WindowBase):
             "model": self.model_var.get(),
             "provider": self._backend(),
             "model_filter": self.model_filter,
+            "model_filter_custom": bool(getattr(self, "_filter_custom", False)),
             "model_family": self.model_family,
             "ollama_model": self._model_by_provider.get("ollama") or "",
             "pgpt_model": self._model_by_provider.get("pgpt") or "",
             "online_model": self._model_by_provider.get("online") or "",
+            "horde_model": self._model_by_provider.get("horde") or "",
+            "horde_key": ollama_fs_access.horde_config().get("key") or "",
             "online_url": ollama_fs_access.online_config().get("url") or "",
             "online_key": ollama_fs_access.online_config().get("key") or "",
             "online_preset": ollama_fs_access.online_config().get("preset") or "",

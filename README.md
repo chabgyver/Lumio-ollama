@@ -44,6 +44,8 @@ Le dossier [`exemple/`](exemple) contient un fichier volontairement faux
 | Discuter d'un dossier | fichiers cochés = contexte envoyé au modèle |
 | Voir l'arborescence | panneau **FICHIERS**, dossiers dépliables, état mémorisé |
 | Choisir un modèle local | bouton du modèle → *Modèles* |
+| Filtrer libres / abliterated / obliterated | *Modèles* → **Tous · Uncensored · Abliterated · Obliterated** |
+| Utiliser un modèle gratuit sans rien installer | moteur **AI Horde** → modèles communautaires (abliterated inclus) |
 | Chercher un modèle en ligne | *Modèles* → **Catalogue en ligne** (470 modèles, tarifs, gratuits) |
 | Trier ces modèles | *Recommandé*, *Puissance estimée*, *Prix*, *Contexte*, *Récent*, *Nom* |
 | Vérifier le code produit | barre d'actions → **Vérifier** |
@@ -60,7 +62,7 @@ Le dossier [`exemple/`](exemple) contient un fichier volontairement faux
 - **Python 3.11+** — [python.org](https://www.python.org/downloads/), en cochant
   « Add python.exe to PATH ».
 - **Ollama** pour les modèles locaux — [ollama.com](https://ollama.com/download).
-  Facultatif si tu utilises uniquement des modèles en ligne.
+  Facultatif si tu utilises uniquement des modèles en ligne ou AI Horde.
 
 ## Installation
 
@@ -97,6 +99,8 @@ pm test`, sinon `py_compile`) |
 | Budget $ par question | stoppe les reprises automatiques au-delà du montant |
 | Commandes autorisées | liste blanche, une commande par ligne |
 | Outils du modèle | autorise `rechercher:` et `lire:` |
+| Désactiver la réflexion | coupe le raisonnement des modèles qui en font (LFM3, Qwen3) : nettement plus rapide sur petite carte |
+| Plafond de contexte | borne les caractères envoyés, même si le modèle annonce 262k de fenêtre |
 | Routage | choix automatique local / en ligne selon la difficulté |
 
 ## Confidentialité
@@ -108,6 +112,8 @@ pm test`, sinon `py_compile`) |
   `%APPDATA%\Lumio` : supprimer ce dossier remet Lumio à zéro.
 - Avec un modèle **en ligne**, le contenu des fichiers cochés part chez le
   fournisseur. Lumio le rappelle dans l'interface.
+- Avec **AI Horde**, il passe sur le GPU de bénévoles : gratuit, mais pas
+  privé. Lumio le rappelle aussi.
 
 ## Sécurité
 
@@ -138,8 +144,9 @@ garde-fous sont volontaires :
 python tests\run_tests.py
 ```
 
-155 tests, sans réseau ni GPU : moteur, session et chiffrement, recherche,
-coûts, instantanés, outils, classement, arborescence, vérification, routage.
+212 tests, sans réseau ni GPU : moteur, session et chiffrement, recherche,
+coûts, instantanés, outils, classement, arborescence, vérification, routage,
+prompt et file d'attente AI Horde.
 Ils tournent sur Windows (`windows-latest`) dans la CI GitHub Actions.
 
 ## Structure
@@ -147,7 +154,7 @@ Ils tournent sur Windows (`windows-latest`) dans la CI GitHub Actions.
 | Module | Rôle |
 |---|---|
 | `gui_tool.py` | interface (Tkinter / CustomTkinter) |
-| `ollama_fs_access.py` | moteur : fichiers, contexte, flux Ollama / OpenAI / PrivateGPT, catalogue |
+| `ollama_fs_access.py` | moteur : fichiers, contexte, flux Ollama / OpenAI / PrivateGPT / AI Horde, catalogue |
 | `lumio_session.py` | session, chiffrement DPAPI, migration |
 | `lumio_search.py` | recherche dans les conversations |
 | `lumio_cost.py` | tokens, coût, journal, budgets |

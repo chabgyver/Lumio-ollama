@@ -16,11 +16,12 @@ from pathlib import Path
 
 OLLAMA_URL = "http://127.0.0.1:11434"
 PGPT_URL = "http://127.0.0.1:8080"
-PROVIDERS = ("ollama", "pgpt", "online")
+PROVIDERS = ("ollama", "pgpt", "online", "horde")
 PROVIDER_LABELS = {
     "ollama": "Ollama",
     "pgpt": "PrivateGPT",
     "online": "En ligne",
+    "horde": "AI Horde",
 }
 ONLINE_PRESETS = (
     ("OpenRouter", "https://openrouter.ai/api/v1"),
@@ -360,6 +361,8 @@ def normalize_provider(name):
     key = str(name or "ollama").strip().casefold().replace(" ", "")
     if key in {"online", "enligne", "openrouter", "deepseek", "api", "cloud"}:
         return "online"
+    if key in {"horde", "aihorde", "ai-horde", "kobold", "hordeai"}:
+        return "horde"
     if key in {"pgpt", "privategpt", "private-gpt", "workbench"}:
         return "pgpt"
     return "ollama"
@@ -429,6 +432,95 @@ def openai_headers():
         headers["HTTP-Referer"] = "https://lumio.local"
         headers["X-Title"] = "Lumio"
     return headers
+
+
+# ==========================================================
+#  AI Horde : modèles communautaires, gratuits, sans téléchargement
+# ==========================================================
+# Service bénévole : la demande part dans une file d'attente, un worker la
+# traite, puis on relit le résultat. Pas de flux, contexte court (2k-8k).
+HORDE_URL = "https://aihorde.net/api/v2"
+HORDE_ANON_KEY = "0000000000"
+HORDE_AGENT = "Lumio:1.0:github.com/lumio-app"
+# Cloudflare (devant aihorde.net) refuse l'agent par défaut d'urllib : erreur 1010.
+HORDE_USER_AGENT = "Lumio/1.0 (Windows NT 10.0; Win64; x64)"
+HORDE_POLL_SECONDS = 3
+HORDE_WAIT_SECONDS = 900        # au-delà, la demande est abandonnée
+HORDE_MAX_TOKENS = 1024         # longueur maximale de la réponse
+HORDE_CONTEXT_TOKENS = 4096     # fenêtre demandée au worker
+HORDE_PROMPT_CHARS = 9_000      # ~2 700 tokens : prompt + réponse tiennent dans la fenêtre
+HORDE_CONTEXT_CHARS = 6_500     # part du prompt réservée aux fichiers
+HORDE_STOPS = ("### Instruction:", "### Response:")
+_HORDE = {"key": ""}
+
+
+def configure_horde(key=""):
+    """Clé AI Horde : vide = clé anonyme (gratuite, priorité basse)."""
+    secret = str(key or "").strip() or str(os.environ.get("LUMIO_HORDE_KEY") or "").strip()
+    _HORDE["key"] = secret
+    return dict(_HORDE)
+
+
+def horde_config():
+    return dict(_HORDE)
+
+
+def horde_key():
+    return str(_HORDE.get("key") or "").strip() or HORDE_ANON_KEY
+
+
+def horde_headers():
+    return {
+        "apikey": horde_key(),
+        "Client-Agent": HORDE_AGENT,
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+        "User-Agent": HORDE_USER_AGENT,
+    }
+
+
+def parse_horde_models(rows):
+    """Modèles texte servis en ce moment, du plus « libre » au plus aligné."""
+    found = {}
+    for row in rows or []:
+        if isinstance(row, str):
+            name, count = str(row).strip(), 1
+        else:
+            name = str((row or {}).get("name") or "").strip()
+            try:
+                count = int((row or {}).get("count") or 0)
+            except (TypeError, ValueError):
+                count = 0
+        if not name:
+            continue
+        found[name] = max(count, found.get(name, 0))
+    # Un modèle sans worker en ligne reste proposé, mais derrière les autres.
+    live = {name: count for name, count in found.items() if count > 0} or found
+    order = {"obliterated": 0, "abliterated": 1, "uncensored": 2, "": 3}
+    return sorted(
+        live,
+        key=lambda name: (
+            order.get(freedom_level(name), 3),
+            -(model_size_billions(name) or 0),
+            name.casefold(),
+        ),
+    )
+
+
+def list_horde_models():
+    request = urllib.request.Request(f"{HORDE_URL}/status/models?type=text", headers=horde_headers())
+    with urllib.request.urlopen(request, timeout=20) as response:
+        data = json.loads(response.read().decode("utf-8"))
+    raw = data.get("models") if isinstance(data, dict) else data
+    return parse_horde_models(raw)
+
+
+def horde_up():
+    try:
+        list_horde_models()
+        return True
+    except Exception:
+        return False
 
 
 # ==========================================================
@@ -668,7 +760,46 @@ UNCENSORED_MARKERS = (
     "lunaris", "goliath", "llewd", "nsfw", "lewd", "erotic", "jailbreak",
     "cognitivecomputations", "dphn", "euryale", "lumimaid", "stheno",
     "toppy", "midnight-rose", "celeste", "starcannon",
+    # abliteration poussée : ces modèles sont aussi « non censurés »
+    "obliterat", "liberated",
 )
+
+# Abliteration classique : une ou quelques directions de refus retirées des
+# poids (Arditi et al.), y compris les passes automatisées type Heretic.
+ABLITERATED_MARKERS = (
+    "abliterat", "abliterated", "heretic", "refusal-removed", "refusal_removed",
+)
+
+# Abliteration lourde : plusieurs directions, souvent toutes les couches, avec
+# vérification de cohérence (OBLITERATUS et pipelines équivalents). Le refus
+# disparaît presque totalement, la cohérence et le suivi d'instructions baissent.
+OBLITERATED_MARKERS = (
+    "obliterat", "obliterated", "obliteratus", "liberated",
+)
+
+# Du plus libre au plus aligné : l'ordre sert au classement et aux filtres.
+FREEDOM_LEVELS = ("obliterated", "abliterated", "uncensored")
+
+FREEDOM_TAGS = {
+    "obliterated": "obliterated · plus aucun refus, cohérence à surveiller",
+    "abliterated": "abliterated · refus retiré des poids",
+    "uncensored": "uncensored · fine-tune sans filtre",
+}
+
+# Filtres proposés dans la liste des modèles (clé, libellé).
+MODEL_FILTERS = (
+    ("all", "Tous"),
+    ("uncensored", "Uncensored"),
+    ("abliterated", "Abliterated"),
+    ("obliterated", "Obliterated"),
+)
+
+MODEL_FILTER_HINTS = {
+    "all": "Tous les modèles, filtrés par la recherche.",
+    "uncensored": "Aucun filtre intégré : fine-tunes (Dolphin, Magnum…), RP, abliterated et obliterated.",
+    "abliterated": "Refus retiré des poids (abliteration, Heretic) — inclut les obliterated.",
+    "obliterated": "Abliteration poussée : plus aucun refus, cohérence et code parfois dégradés.",
+}
 
 
 FAMILY_LABELS = {
@@ -707,6 +838,82 @@ def is_uncensored_model(name, extra=""):
     return any(low == item.casefold() or low.startswith(item.casefold()) for item in UNCENSORED_ALWAYS)
 
 
+def is_abliterated_model(name, extra=""):
+    blob = f"{name} {extra}".casefold()
+    return any(token in blob for token in ABLITERATED_MARKERS)
+
+
+def is_obliterated_model(name, extra=""):
+    blob = f"{name} {extra}".casefold()
+    return any(token in blob for token in OBLITERATED_MARKERS)
+
+
+def freedom_level(name, extra=""):
+    """« obliterated » > « abliterated » > « uncensored » > « » (aligné)."""
+    if is_obliterated_model(name, extra):
+        return "obliterated"
+    if is_abliterated_model(name, extra):
+        return "abliterated"
+    if is_uncensored_model(name, extra):
+        return "uncensored"
+    return ""
+
+
+def freedom_tag(name, extra=""):
+    """Libellé court expliquant pourquoi le modèle est classé ainsi."""
+    return FREEDOM_TAGS.get(freedom_level(name, extra), "")
+
+
+MODEL_FILTER_ALIASES = {"libre": "uncensored", "uncensored+coder": "uncensored",
+                       "libres": "uncensored", "ablit": "abliterated", "oblit": "obliterated"}
+
+
+def normalize_model_filter(kind):
+    key = str(kind or "").strip().casefold()
+    key = MODEL_FILTER_ALIASES.get(key, key)
+    for token, _label in MODEL_FILTERS:
+        if token == key:
+            return token
+    return "all"
+
+
+def model_filter_label(kind):
+    key = normalize_model_filter(kind)
+    for token, label in MODEL_FILTERS:
+        if token == key:
+            return label
+    return MODEL_FILTERS[0][1]
+
+
+def model_filter_hint(kind):
+    return MODEL_FILTER_HINTS.get(normalize_model_filter(kind), "")
+
+
+def freedom_counts(names, extra_by_name=None):
+    """Répartit des noms de modèles par niveau de liberté."""
+    counts = {"obliterated": 0, "abliterated": 0, "uncensored": 0, "aligned": 0}
+    extras = extra_by_name or {}
+    for name in names or []:
+        level = freedom_level(name, extras.get(name, ""))
+        counts[level or "aligned"] += 1
+    return counts
+
+
+def freedom_summary(counts):
+    counts = counts or {}
+    parts = []
+    for key, label in (
+        ("obliterated", "obliterated"),
+        ("abliterated", "abliterated"),
+        ("uncensored", "uncensored"),
+        ("aligned", "alignés"),
+    ):
+        value = counts.get(key, 0)
+        if value:
+            parts.append(f"{value} {label}")
+    return " · ".join(parts)
+
+
 def model_family(name):
     text = str(name or "").strip()
     if not text:
@@ -740,8 +947,15 @@ def list_model_families(names):
 
 def filter_models(names, kind="all", family=""):
     names = [str(item).strip() for item in (names or []) if str(item).strip()]
-    key = str(kind or "all").strip().casefold()
-    if key in {"uncensored", "libre"}:
+    key = normalize_model_filter(kind)
+    if key == "obliterated":
+        names = [name for name in names if freedom_level(name) == "obliterated"]
+    elif key == "abliterated":
+        names = [
+            name for name in names
+            if freedom_level(name) in {"abliterated", "obliterated"}
+        ]
+    elif key == "uncensored":
         names = [name for name in names if is_uncensored_model(name)]
     wanted = str(family or "").strip().casefold()
     if wanted:
@@ -760,19 +974,38 @@ def looks_like_ollama_model(name):
 
 _WEAK_CODER_MARKERS = (
     "remm", "mythomax", "toppy", "lunaris", "weaver", "unslop",
-    "l2-13b", "13b", "12b", "8b", "7b",
 )
 _STRONG_CODER_MARKERS = (
     "dolphin-mistral-24b", "dolphin3.0", "venice-edition",
     "magnum-v4-72b", "cydonia-24b", "skyfall-36b", "euryale-70b",
 )
+# Taille lue dans le nom : « 7b », « 27b », « 1.5b » — mais pas le 7 de 27b.
+_SIZE_TOKEN = re.compile(r"(\d+(?:\.\d+)?)\s*b(?![a-z0-9])", re.IGNORECASE)
+_WEAK_CODER_MAX_BILLIONS = 13
+
+
+def model_size_billions(name):
+    """Taille en milliards de paramètres lue dans le nom (None si absente)."""
+    match = _SIZE_TOKEN.search(str(name or ""))
+    if not match:
+        return None
+    try:
+        return float(match.group(1))
+    except (TypeError, ValueError):
+        return None
 
 
 def is_weak_coder(name):
     low = str(name or "").casefold()
     if any(token in low for token in _STRONG_CODER_MARKERS):
         return False
-    return any(token in low for token in _WEAK_CODER_MARKERS)
+    # Un modèle explicitement « coder » n'est pas un modèle de rôle-play.
+    if "coder" in low or "-code" in low:
+        return False
+    if any(token in low for token in _WEAK_CODER_MARKERS):
+        return True
+    size = model_size_billions(name)
+    return size is not None and size <= _WEAK_CODER_MAX_BILLIONS
 
 
 def model_coding_tag(name):
@@ -803,6 +1036,9 @@ def pick_listed_model(names, saved="", provider="ollama"):
         pick = best_coder(names)
         if pick:
             return pick
+    if key == "horde":
+        # La liste Horde est déjà triée : liberté, puis taille.
+        return names[0] if names else ""
     if key == "pgpt":
         for token in ("coder", "qwen", "instruct"):
             for name in names:
@@ -925,6 +1161,8 @@ def list_models(provider="ollama"):
     key = normalize_provider(provider)
     if key == "online":
         return list_online_models()
+    if key == "horde":
+        return list_horde_models()
     if key == "pgpt":
         return list_pgpt_models()
     request = urllib.request.Request(f"{OLLAMA_URL}/api/tags")
@@ -971,6 +1209,8 @@ def backend_up(provider="ollama"):
     key = normalize_provider(provider)
     if key == "online":
         return online_up()
+    if key == "horde":
+        return horde_up()
     if key == "pgpt":
         return pgpt_up()
     return ollama_up()
@@ -1003,6 +1243,13 @@ VISION_MARKERS = (
     "gemma3", "mistral-small3",
 )
 VISION_HELPER = "moondream"
+
+# Modèles qui réfléchissent avant de répondre. La liste ne sert que de repli
+# quand Ollama (ancien) n'expose pas encore la capacité « thinking ».
+THINKING_MARKERS = (
+    "qwen3", "deepseek-r1", "-r1", "reasoner", "thinking", "magistral",
+    "gpt-oss", "lfm3", "heretic-think",
+)
 
 
 _SHOW_CACHE = {}
@@ -1037,6 +1284,20 @@ def supports_vision(name):
         pass
     low = str(name).casefold()
     return any(marker in low for marker in VISION_MARKERS)
+
+
+def supports_thinking(name):
+    """Le modèle réfléchit-il avant de répondre (capacité « thinking ») ?"""
+    if not name:
+        return False
+    try:
+        info = _ollama_show(name)
+        caps = [str(item).casefold() for item in (info.get("capabilities") or [])]
+        if caps:
+            return "thinking" in caps
+    except Exception:
+        pass
+    return any(marker in str(name).casefold() for marker in THINKING_MARKERS)
 
 
 def pick_vision_model(preferred=None):
@@ -1173,6 +1434,8 @@ def describe_images(images, model, cancel_event=None, on_open=None):
 def explain_backend_error(error, images=False, provider="ollama"):
     key = normalize_provider(provider)
     label = provider_label(key)
+    if key == "horde" and isinstance(error, urllib.error.HTTPError):
+        return horde_error(error)
     if isinstance(error, urllib.error.HTTPError):
         detail = _http_error_text(error)
         if images and _looks_like_image_refusal(error):
@@ -1191,10 +1454,14 @@ def explain_backend_error(error, images=False, provider="ollama"):
     if isinstance(reason, TimeoutError) or "timed out" in text:
         if key == "online":
             return f"{label} met trop de temps à répondre. Vérifiez l'URL, la clé et votre connexion."
+        if key == "horde":
+            return f"{label} met trop de temps à répondre. Vérifiez votre connexion Internet."
         return f"{label} met trop de temps à répondre. Vérifiez qu'il est ouvert et qu'un modèle est chargé."
     if isinstance(reason, ConnectionRefusedError) or "refused" in text or "10061" in text:
         if key == "online":
             return f"{label} n'est pas joignable. Vérifiez l'URL et votre connexion Internet."
+        if key == "horde":
+            return f"{label} n'est pas joignable. Vérifiez votre connexion Internet."
         if key == "pgpt":
             return (
                 "PrivateGPT n'est pas lancé. Ouvrez le workbench "
@@ -1203,6 +1470,8 @@ def explain_backend_error(error, images=False, provider="ollama"):
         return "Ollama n'est pas lancé. Ouvrez Ollama, attendez qu'il soit prêt, puis cliquez sur Modèles."
     if key == "online":
         return f"{label} ne répond pas ({error})"
+    if key == "horde":
+        return f"{label} ne répond pas ({error}). Vérifiez votre connexion Internet."
     if key == "pgpt":
         return f"{label} ne répond pas sur 127.0.0.1:8080 ({error})"
     return f"Ollama ne répond pas sur 127.0.0.1:11434 ({error})"
@@ -1212,9 +1481,26 @@ def explain_ollama_error(error, images=False, provider="ollama"):
     return explain_backend_error(error, images=images, provider=provider)
 
 
-def context_budget(model=None):
-    """Caractères de fichiers à envoyer, selon la fenêtre du modèle."""
+def context_budget(model=None, provider=None, cap=0):
+    """Caractères de fichiers à envoyer, selon la fenêtre du modèle.
+
+    ``cap`` (0 = aucun) plafonne le résultat : un modèle qui annonce 262k de
+    contexte ne doit pas faire envoyer 200 000 caractères sur une petite carte.
+    """
+    limit = _context_budget_base(model, provider)
+    try:
+        ceiling = int(cap or 0)
+    except (TypeError, ValueError):
+        ceiling = 0
+    if ceiling > 0:
+        limit = max(4_000, min(limit, ceiling))
+    return limit
+
+
+def _context_budget_base(model=None, provider=None):
     default = CONTEXT_CHAR_LIMIT
+    if normalize_provider(provider or "ollama") == "horde":
+        return HORDE_CONTEXT_CHARS
     if not model:
         return default
     try:
@@ -2413,11 +2699,286 @@ def ask_online(model, question, context, history=None, on_delta=None, on_open=No
     )
 
 
-def ask_ollama(model, question, context, history=None, on_delta=None, on_open=None, cancel_event=None, attach_files=True, images=None, on_notice=None, on_progress=None, on_thinking=None, on_stats=None, provider="ollama"):
+# ------------------------------------------------------------------
+#  AI Horde : prompt unique, génération différée, pas de flux
+# ------------------------------------------------------------------
+_THINK_BLOCK = re.compile(r"<think(?:ing)?>(.*?)</think(?:ing)?>", re.IGNORECASE | re.DOTALL)
+
+
+def shrink_prompt(prompt, limit, keep_head=0):
+    """Coupe le milieu d'un prompt trop long : consignes au début, question à la fin."""
+    text = str(prompt or "")
+    limit = int(limit or 0)
+    if limit <= 0 or len(text) <= limit:
+        return text
+    marker = "\n\n[…tronqué…]\n\n"
+    head_len = max(0, min(int(keep_head or 0), limit // 3))
+    tail_len = limit - head_len - len(marker)
+    if tail_len <= 0:
+        return text[:limit]
+    return text[:head_len] + marker + text[-tail_len:]
+
+
+def horde_prompt(question, context, history=None, attach_files=True, limit=HORDE_PROMPT_CHARS):
+    """Assemble les messages Lumio en un prompt unique : AI Horde n'a pas de rôles."""
+    messages, user = _chat_messages(question, context, history, attach_files)
+    system = ""
+    blocks = []
+    for item in messages:
+        role = str((item or {}).get("role") or "")
+        text = str((item or {}).get("content") or "").strip()
+        if not text:
+            continue
+        if role == "system":
+            system = text
+        elif role == "user":
+            blocks.append(f"### Instruction:\n{text}")
+        elif role == "assistant":
+            blocks.append(f"### Response:\n{text}")
+    blocks.append(f"### Instruction:\n{user}")
+    head = f"{system}\n\n" if system else ""
+    return shrink_prompt(
+        head + "\n\n".join(blocks) + "\n\n### Response:\n", limit, keep_head=len(head),
+    )
+
+
+def split_horde_thinking(text):
+    """Sépare le raisonnement <think>…</think> du texte, comme les autres moteurs."""
+    raw = str(text or "")
+    if "<think" not in raw.casefold():
+        return "", raw.strip()
+    thoughts = [match.group(1).strip() for match in _THINK_BLOCK.finditer(raw)]
+    rest = _THINK_BLOCK.sub("", raw)
+    opened = rest.casefold().find("<think")
+    if opened >= 0:
+        thoughts.append(rest[opened + len("<think"):].strip("\n >"))
+        rest = rest[:opened]
+    return "\n\n".join(bit for bit in thoughts if bit), rest.strip()
+
+
+def chunk_text(text, size=160):
+    """Découpe une réponse arrivant d'un coup en morceaux affichables."""
+    body = str(text or "")
+    step = max(1, int(size or 1))
+    return [body[index:index + step] for index in range(0, len(body), step)]
+
+
+def horde_error(error):
+    """Message lisible pour un refus d'AI Horde (403 = clé invalide OU modèle sans worker)."""
+    code = int(getattr(error, "code", 0) or 0)
+    message = ""
+    detail = ""
+    if isinstance(error, urllib.error.HTTPError):
+        try:
+            body = error.read().decode("utf-8", errors="replace")
+            data = json.loads(body)
+            message = str((data or {}).get("message") or "")
+            errors = (data or {}).get("errors") or {}
+            if isinstance(errors, dict) and errors:
+                message = "; ".join(f"{key}: {value}" for key, value in errors.items())
+            detail = message or body.strip()
+        except Exception:
+            detail = _http_error_text(error)
+    else:
+        detail = str(error)
+    low = f"{message} {detail}".casefold()
+    if any(
+        token in low
+        for token in ("no online worker", "noeligibleworker", "no available worker", "cannot be served")
+    ):
+        return (
+            "Aucun worker AI Horde ne sert ce modèle pour l'instant. "
+            "Prenez-en un autre (Actualiser), ou réessayez plus tard."
+        )
+    if "api key" in low or "apikey" in low:
+        return (
+            "AI Horde a refusé la clé API. Cliquez sur « Clé AI Horde » "
+            "et collez-en une nouvelle."
+        )
+    if code in {401, 403}:
+        return (
+            "AI Horde a refusé la clé API. Cliquez sur « Clé AI Horde » "
+            f"et collez-en une nouvelle. {detail}"
+        ).strip()
+    if code == 429:
+        return f"AI Horde est saturé (file pleine) : réessayez dans une minute. {detail}".strip()
+    if code == 404:
+        return "AI Horde ne trouve plus la demande : relancez la question."
+    return f"AI Horde a refusé la requête ({code}) : {detail}".strip()
+
+
+def horde_submit(model, prompt):
+    """Dépose la demande dans la file et renvoie (identifiant, kudos)."""
+    payload = {
+        "prompt": prompt,
+        "params": {
+            "max_length": HORDE_MAX_TOKENS,
+            "max_context_length": HORDE_CONTEXT_TOKENS,
+            "temperature": 0.3,
+            "top_p": 0.9,
+            "rep_pen": 1.05,
+            "stop": list(HORDE_STOPS),
+        },
+        "models": [model],
+        "nsfw": False,
+    }
+    request = urllib.request.Request(
+        f"{HORDE_URL}/generate/text/async",
+        data=json.dumps(payload).encode("utf-8"),
+        headers=horde_headers(),
+    )
+    with urllib.request.urlopen(request, timeout=45) as response:
+        data = json.loads(response.read().decode("utf-8"))
+    return str(data.get("id") or ""), float(data.get("kudos") or 0.0)
+
+
+def horde_status(job_id):
+    request = urllib.request.Request(
+        f"{HORDE_URL}/generate/text/status/{job_id}", headers=horde_headers(),
+    )
+    with urllib.request.urlopen(request, timeout=30) as response:
+        return json.loads(response.read().decode("utf-8"))
+
+
+def horde_cancel(job_id):
+    """Retire la demande de la file (sans effet si un worker l'a déjà prise)."""
+    try:
+        request = urllib.request.Request(
+            f"{HORDE_URL}/generate/text/status/{job_id}",
+            headers=horde_headers(), method="DELETE",
+        )
+        urllib.request.urlopen(request, timeout=10).close()
+    except Exception:
+        return False
+    return True
+
+
+def horde_wait(job_id, cancel_event=None, on_progress=None, wait=HORDE_WAIT_SECONDS):
+    """Attend la fin de la génération. None si l'utilisateur annule."""
+    deadline = time.time() + max(30, int(wait or HORDE_WAIT_SECONDS))
+    shown = ""
+    while time.time() < deadline:
+        if cancel_event is not None and cancel_event.is_set():
+            horde_cancel(job_id)
+            return None
+        status = horde_status(job_id)
+        if status.get("faulted"):
+            raise RuntimeError(
+                "AI Horde : la génération a échoué côté worker. Relancez la question."
+            )
+        if status.get("done"):
+            return status
+        if status.get("is_possible") is False:
+            raise RuntimeError(
+                "Aucun worker AI Horde ne peut prendre ce modèle pour l'instant. "
+                "Choisissez un autre modèle, ou réessayez plus tard."
+            )
+        bits = ["AI Horde : file d'attente"]
+        position = status.get("queue_position")
+        eta = status.get("wait_time")
+        if isinstance(position, (int, float)) and position > 0:
+            bits.append(f"position {int(position)}")
+        if isinstance(eta, (int, float)) and eta > 0:
+            bits.append(f"~{int(eta)} s")
+        label = " · ".join(bits)
+        if on_progress is not None and label != shown:
+            shown = label
+            on_progress(label)
+        time.sleep(HORDE_POLL_SECONDS)
+    horde_cancel(job_id)
+    raise RuntimeError("AI Horde n'a pas répondu dans le délai imparti. Réessayez plus tard.")
+
+
+def horde_reply(status):
+    """Première génération non censurée d'un statut terminé."""
+    for item in (status or {}).get("generations") or []:
+        if not isinstance(item, dict) or item.get("censored"):
+            continue
+        text = str(item.get("text") or "").strip()
+        if text:
+            return text, item
+    return "", {}
+
+
+def ask_horde(model, question, context, history=None, on_delta=None, on_open=None, cancel_event=None, attach_files=True, images=None, on_notice=None, on_progress=None, on_thinking=None, on_stats=None):
+    """Question à un modèle communautaire AI Horde : gratuit, en file d'attente."""
+    images = [item for item in (images or []) if item]
+    if not str(model).strip():
+        raise RuntimeError("Aucun modèle AI Horde sélectionné")
+    if not str(question).strip() and not images:
+        raise RuntimeError("Question vide")
+    if images and on_notice is not None:
+        on_notice("AI Horde : la capture n'est pas envoyée, seul le texte du dossier l'est.")
+    LAST_USAGE.clear()
+    prompt = horde_prompt(question, context, history, attach_files)
+    if on_progress is not None:
+        on_progress(f"AI Horde : envoi à « {model} »…")
+    started = time.time()
+    try:
+        job_id, kudos = horde_submit(model, prompt)
+    except urllib.error.HTTPError as error:
+        raise RuntimeError(horde_error(error)) from error
+    except urllib.error.URLError as error:
+        raise RuntimeError(explain_backend_error(error, provider="horde")) from error
+    if not job_id:
+        raise RuntimeError("AI Horde n'a pas renvoyé d'identifiant de tâche. Réessayez.")
+    try:
+        status = horde_wait(job_id, cancel_event=cancel_event, on_progress=on_progress)
+    except urllib.error.HTTPError as error:
+        raise RuntimeError(horde_error(error)) from error
+    except urllib.error.URLError as error:
+        raise RuntimeError(explain_backend_error(error, provider="horde")) from error
+    if status is None:
+        return ""
+    text, _generation = horde_reply(status)
+    if not text:
+        raise RuntimeError(
+            "AI Horde n'a renvoyé aucun texte : le worker a peut-être filtré la réponse. "
+            "Relancez, ou prenez un autre modèle."
+        )
+    thinking, answer = split_horde_thinking(text)
+    if thinking and on_thinking is not None:
+        on_thinking(thinking)
+    if cancel_event is not None and cancel_event.is_set():
+        return ""
+    for piece in chunk_text(answer):
+        if on_delta is not None:
+            on_delta(piece)
+    if on_stats is not None:
+        seconds = max(1.0, time.time() - started)
+        bits = [f"~{max(1, len(answer) // 4)} tok", f"{seconds:.0f} s"]
+        if kudos:
+            bits.append(f"{kudos:.0f} kudos")
+        on_stats(" · ".join(bits))
+    return answer
+
+
+def ollama_chat_payload(model, messages, options=None, think=None, keep_alive="30m"):
+    """Charge utile /api/chat. « think » n'est envoyé qu'aux modèles qui savent le faire."""
+    payload = {
+        "model": model,
+        "stream": True,
+        "messages": messages,
+        "keep_alive": keep_alive,
+    }
+    if options:
+        payload["options"] = dict(options)
+    if think is not None and supports_thinking(model):
+        payload["think"] = bool(think)
+    return payload
+
+
+def ask_ollama(model, question, context, history=None, on_delta=None, on_open=None, cancel_event=None, attach_files=True, images=None, on_notice=None, on_progress=None, on_thinking=None, on_stats=None, provider="ollama", think=None):
     """Envoie une question au modèle local ou en ligne et renvoie la réponse au fil de l'eau."""
     key = normalize_provider(provider)
     if key == "online":
         return ask_online(
+            model, question, context, history=history, on_delta=on_delta, on_open=on_open,
+            cancel_event=cancel_event, attach_files=attach_files, images=images,
+            on_notice=on_notice, on_progress=on_progress, on_thinking=on_thinking, on_stats=on_stats,
+        )
+    if key == "horde":
+        return ask_horde(
             model, question, context, history=history, on_delta=on_delta, on_open=on_open,
             cancel_event=cancel_event, attach_files=attach_files, images=images,
             on_notice=on_notice, on_progress=on_progress, on_thinking=on_thinking, on_stats=on_stats,
@@ -2468,14 +3029,15 @@ def ask_ollama(model, question, context, history=None, on_delta=None, on_open=No
     if images:
         message["images"] = images
     messages.append(message)
-    payload = {"model": model, "stream": True, "messages": messages, "keep_alive": "30m"}
+    options = None
     ctx = model_num_ctx(model)
     if ctx:
         # Reserve for this conversation and the answer, rather than always
         # allocating the model's maximum window (which can exhaust GPU RAM).
         input_bytes = sum(len(str(item.get("content", "")).encode("utf-8")) + 256 for item in messages)
         needed = max(4096, ((input_bytes + 4096 + 1023) // 1024) * 1024)
-        payload["options"] = {"num_ctx": ctx if images else min(ctx, needed)}
+        options = {"num_ctx": ctx if images else min(ctx, needed)}
+    payload = ollama_chat_payload(model, messages, options=options, think=think)
 
     if not ollama_up():
         raise RuntimeError(
