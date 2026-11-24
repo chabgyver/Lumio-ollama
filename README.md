@@ -174,7 +174,14 @@ Ils tournent sur Windows (`windows-latest`) dans la CI GitHub Actions.
 
 | Module | Rôle |
 |---|---|
-| `gui_tool.py` | interface (Tkinter / CustomTkinter) |
+| `gui_tool.py` | fenêtre principale, conversation, boucle de l'agent |
+| `lumio_ui_versions.py` | fenêtre des versions de fichiers |
+| `lumio_ui_costs.py` | panneau coût et tokens |
+| `lumio_ui_image.py` | écran de génération d'images |
+| `lumio_ui_models.py` | fenêtre de choix du modèle |
+| `lumio_ui_settings.py` | fenêtre des réglages |
+| `lumio_ui_catalog.py` | catalogue des modèles en ligne |
+| `lumio_ui_palette.py` | palette de commandes et aide |
 | `ollama_fs_access.py` | moteur : fichiers, contexte, flux Ollama / OpenAI / AI Horde, catalogue |
 | `lumio_image.py` | génération d'images (Ollama local, AI Horde) |
 | `lumio_session.py` | session, chiffrement DPAPI, migration |
