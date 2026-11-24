@@ -6351,10 +6351,14 @@ class FileSystemWrapper(_WindowBase):
                     hint = "clé API manquante"
                 elif provider == "horde":
                     hint = "AI Horde injoignable"
+                elif provider == "ollama":
+                    # Le serveur répond : il n'a simplement aucun modèle.
+                    hint = "aucun modèle installé"
                 else:
-                    hint = f"{label} arrêté"
+                    hint = f"{label} : aucun modèle"
             else:
-                hint = f"{label} arrêté"
+                # Des modèles existent, aucun n'a pu être retenu.
+                hint = f"{label} : modèle indisponible"
             self.ollama_state.configure(text=f"·  {hint}")
         self._refresh_model_button()
         self._save_session()
