@@ -72,8 +72,9 @@ cd Lumio-ollama
 python -m pip install -r requirements.txt
 ```
 
-Puis double-clique **Lumio.lnk** (ou `Lumio.bat`). Le lanceur démarre Ollama si
-besoin, vérifie les dépendances, puis ouvre l'interface.
+Puis double-clique **`Lumio.bat`** : le raccourci `Lumio.lnk` est créé au premier
+lancement. Le lanceur démarre Ollama si besoin, vérifie les dépendances, puis
+ouvre l'interface.
 
 Sans Git : télécharge le ZIP du dépôt, décompresse-le, puis lance les mêmes
 commandes dans le dossier.

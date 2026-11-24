@@ -24,3 +24,6 @@ snapshots/
 Thumbs.db
 desktop.ini
 .DS_Store
+
+# Raccourci Windows, recréé au lancement par Lumio
+*.lnk

@@ -3,8 +3,9 @@
 Assistant de bureau pour travailler sur **un dossier** avec un modèle local (Ollama),
 un modèle en ligne (OpenRouter, Groq, DeepSeek…) ou PrivateGPT.
 
-Double-clique `Lumio.lnk` (ou `Lumio.bat`). Le lanceur démarre Ollama, PrivateGPT
-s'il est présent, puis l'interface. Une seule instance à la fois.
+Double-clique `Lumio.bat` : au premier lancement, Lumio crée lui-même le
+raccourci `Lumio.lnk`. Le lanceur démarre Ollama, PrivateGPT s'il est présent,
+puis l'interface. Une seule instance à la fois.
 
 ## Ce que Lumio sait faire
 
