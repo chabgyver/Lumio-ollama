@@ -103,6 +103,25 @@ pm test`, sinon `py_compile`) |
 | Plafond de contexte | borne les caractères envoyés, même si le modèle annonce 262k de fenêtre |
 | Routage | choix automatique local / en ligne selon la difficulté |
 
+## Générer une image
+
+Le bouton **Image** de la zone de saisie (ou `Ctrl+Maj+G`) ouvre un écran de
+génération : une phrase, un modèle, un format, une graine. Deux moteurs :
+
+| Moteur | Modèles | Coût |
+|---|---|---|
+| Ollama (local, macOS) | `x/z-image-turbo`, `x/flux2-klein` | gratuit |
+| AI Horde | SDXL, Flux, Pony… | kudos, file d'attente |
+
+L'image s'affiche dans l'aperçu, puis s'ajoute à la conversation : on
+l'enregistre dans le dossier, on la joint à la question suivante (le modèle la
+commente), ou on la régénère avec la même graine.
+
+La génération d'images d'Ollama reste expérimentale et **macOS seulement** à ce
+jour : sur Windows, le moteur local n'expose aucun modèle d'images et Lumio
+l'indique. AI Horde fonctionne partout, avec une file d'attente qui peut être
+longue (elle raccourcit avec une clé de compte gratuite, donc des kudos).
+
 ## Confidentialité
 
 - Avec un modèle **local**, rien ne quitte la machine.
@@ -144,9 +163,9 @@ garde-fous sont volontaires :
 python tests\run_tests.py
 ```
 
-212 tests, sans réseau ni GPU : moteur, session et chiffrement, recherche,
+248 tests, sans réseau ni GPU : moteur, session et chiffrement, recherche,
 coûts, instantanés, outils, classement, arborescence, vérification, routage,
-prompt et file d'attente AI Horde.
+prompt et file d'attente AI Horde, génération d'images.
 Ils tournent sur Windows (`windows-latest`) dans la CI GitHub Actions.
 
 ## Structure
@@ -155,6 +174,7 @@ Ils tournent sur Windows (`windows-latest`) dans la CI GitHub Actions.
 |---|---|
 | `gui_tool.py` | interface (Tkinter / CustomTkinter) |
 | `ollama_fs_access.py` | moteur : fichiers, contexte, flux Ollama / OpenAI / PrivateGPT / AI Horde, catalogue |
+| `lumio_image.py` | génération d'images (Ollama local, AI Horde) |
 | `lumio_session.py` | session, chiffrement DPAPI, migration |
 | `lumio_search.py` | recherche dans les conversations |
 | `lumio_cost.py` | tokens, coût, journal, budgets |

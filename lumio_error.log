@@ -1,0 +1,8 @@
+Traceback (most recent call last):
+  File "\\chabgyver\Web\+++ 2026\+++ APPS\Ollama accès dossiers\smoke.py", line 30, in <module>
+    app.edit_horde_key(); app.update()
+    ~~~~~~~~~~~~~~~~~~^^
+  File "\\chabgyver\Web\+++ 2026\+++ APPS\Ollama accès dossiers\gui_tool.py", line 1598, in edit_horde_key
+    text_color=self.C["text"], font=self.font_heading, anchor="w",
+               ~~~~~~^^^^^^^^
+TypeError: 'method' object is not subscriptable

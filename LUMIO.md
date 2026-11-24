@@ -15,6 +15,7 @@ s'il est présent, puis l'interface. Une seule instance à la fois.
 | Filtrer libres / abliterated / obliterated | *Modèles* → **Tous · Uncensored · Abliterated · Obliterated** |
 | Utiliser un modèle gratuit sans téléchargement | moteur **AI Horde** (modèles communautaires, abliterated inclus) |
 | Chercher un modèle en ligne (470 modèles, tarifs, gratuits) | *Modèles* → **Catalogue en ligne** |
+| Générer une image (Ollama local ou AI Horde) | barre d'actions → **Image** (`Ctrl+Maj+G`) |
 | Trier ces modèles (recommandé, puissance, prix, contexte, date) | Catalogue → **Trier par** |
 | Vérifier le code produit (boucle agent) | barre d'actions → **Vérifier** |
 | Revenir à une version précédente d'un fichier | *Palette* → **Versions des fichiers** |
