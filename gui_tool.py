@@ -40,6 +40,7 @@ import lumio_rank
 import lumio_router
 import lumio_search
 import lumio_session
+import lumio_ui_versions
 import lumio_tree
 import lumio_snapshots
 import lumio_tools
@@ -2886,72 +2887,8 @@ class FileSystemWrapper(_WindowBase):
         self._verify_job = self.after(900, lambda: self.run_verification(auto=True))
 
     def versions_dialog(self):
-        rows = lumio_snapshots.entries(folder=self.target_folder, limit=60)
-        dialog = ctk.CTkToplevel(self)
-        dialog.title("Versions des fichiers")
-        dialog.geometry("720x520")
-        dialog.minsize(520, 360)
-        dialog.configure(fg_color=self.C("bg"))
-        dialog.transient(self)
-        try:
-            dialog.grab_set()
-        except Exception:
-            pass
-
-        ctk.CTkLabel(
-            dialog, text="Versions des fichiers", text_color=self.C("text"),
-            font=self.font_heading, anchor="w",
-        ).pack(fill="x", padx=16, pady=(14, 2))
-        self._styled(
-            ctk.CTkLabel(
-                dialog, text="Chaque écriture de Lumio archive la version précédente.",
-                font=self.font_tiny, anchor="w",
-            ),
-            "muted",
-        ).pack(fill="x", padx=16, pady=(0, 8))
-
-        listing = self._styled(ctk.CTkScrollableFrame(dialog, corner_radius=10), "well")
-        listing.pack(fill="both", expand=True, padx=14, pady=(0, 8))
-
-        if not rows:
-            self._styled(
-                ctk.CTkLabel(listing, text="Aucune version enregistrée pour ce dossier.", font=self.font_small),
-                "muted",
-            ).pack(pady=12)
-
-        def make_restore(entry):
-            def restore():
-                try:
-                    target = lumio_snapshots.restore(entry, folder=self.target_folder)
-                except Exception as error:
-                    messagebox.showerror(APP_NAME, f"Restauration impossible : {error}")
-                    return
-                self.reload_files(confirm=False)
-                self._add_bubble("notice", f"Version restaurée : {target.name} ({entry.get('at')})")
-                self._set_status("Version restaurée")
-                dialog.destroy()
-
-            return restore
-
-        for entry in rows:
-            card = self._styled(ctk.CTkFrame(listing, corner_radius=8), "raised")
-            card.pack(fill="x", padx=4, pady=2)
-            self._button(card, "Restaurer", make_restore(entry), width=90).pack(side="right", padx=8, pady=6)
-            body = ctk.CTkFrame(card, fg_color="transparent")
-            body.pack(side="left", fill="x", expand=True, padx=8, pady=6)
-            self._styled(
-                ctk.CTkLabel(body, text=str(entry.get("relative")), font=self.font_small, anchor="w"), "text",
-            ).pack(fill="x")
-            self._styled(
-                ctk.CTkLabel(
-                    body,
-                    text=f"{entry.get('at')} · {int(entry.get('size') or 0)} octets · {entry.get('reason')}",
-                    font=self.font_tiny, anchor="w",
-                ),
-                "muted",
-            ).pack(fill="x")
-        self._bind_scrollable_wheel(listing, dialog)
-        self._button(dialog, "Fermer", lambda: dialog.destroy()).pack(pady=(0, 12))
+        """Liste des versions archivees (voir lumio_ui_versions.py)."""
+        lumio_ui_versions.show(self)
 
     def _budget_exhausted(self):
         """Vrai si le budget de la question est atteint (et le signale une fois)."""
