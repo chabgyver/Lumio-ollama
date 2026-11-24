@@ -116,7 +116,8 @@ génération : une phrase, un modèle, un format, une graine. Deux moteurs :
 
 L'image s'affiche dans l'aperçu, puis s'ajoute à la conversation : on
 l'enregistre dans le dossier, on la joint à la question suivante (le modèle la
-commente), ou on la régénère avec la même graine.
+commente), ou on la régénère avec la même graine. Chaque image est aussi copiée
+dans `%APPDATA%\Lumio\images` : une conversation rouverte la retrouve.
 
 La génération d'images d'Ollama reste expérimentale et **macOS seulement** à ce
 jour : sur Windows, le moteur local n'expose aucun modèle d'images et Lumio
@@ -128,8 +129,8 @@ longue (elle raccourcit avec une clé de compte gratuite, donc des kudos).
 - Avec un modèle **local**, rien ne quitte la machine.
 - La clé API est **chiffrée avec le DPAPI** de Windows et stockée dans
   `%APPDATA%\Lumio\session.json`, jamais dans le dépôt.
-- Les conversations, le journal de coût et les versions de fichiers vivent dans
-  `%APPDATA%\Lumio` : supprimer ce dossier remet Lumio à zéro.
+- Les conversations, les images générées, le journal de coût et les versions de
+  fichiers vivent dans `%APPDATA%\Lumio` : supprimer ce dossier remet Lumio à zéro.
 - Avec un modèle **en ligne**, le contenu des fichiers cochés part chez le
   fournisseur. Lumio le rappelle dans l'interface.
 - Avec **AI Horde**, il passe sur le GPU de bénévoles : gratuit, mais pas

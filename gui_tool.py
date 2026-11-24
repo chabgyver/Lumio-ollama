@@ -54,11 +54,22 @@ else:
 APP_DIR = Path(__file__).resolve().parent
 APP_NAME = "Lumio"
 APP_TAGLINE = "Compagnon d'Ollama"
+APP_VERSION = "1.0"
 # La session vit dans %APPDATA%\Lumio (hors du partage web) ; l'ancien fichier
 # du dossier applicatif est migré au premier lancement.
 SESSION_PATH = lumio_session.session_path()
 LEGACY_SESSION_PATH = APP_DIR / "session.json"
-LOG_PATH = APP_DIR / "lumio_error.log"
+LOG_PATH = lumio_session.session_path().parent / "lumio_error.log"
+
+
+def images_dir():
+    """Copies des images générées, dans %APPDATA%\\Lumio (hors dossier de travail)."""
+    dossier = lumio_session.session_path().parent / "images"
+    try:
+        dossier.mkdir(parents=True, exist_ok=True)
+    except OSError:
+        pass
+    return dossier
 ICON_PNG = APP_DIR / "assets" / "lumio-icon.png"
 ICON_ICO = APP_DIR / "assets" / "lumio.ico"
 TITLE_FONT = APP_DIR / "assets" / "InstrumentSerif-Regular.ttf"
@@ -93,6 +104,7 @@ def report_error(exc_type, exc, tb) -> None:
     """
     message = "".join(traceback.format_exception(exc_type, exc, tb))
     try:
+        LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
         LOG_PATH.write_text(message, encoding="utf-8")
     except OSError:
         pass
@@ -262,7 +274,7 @@ class FileSystemWrapper(_WindowBase):
             self.TkdndVersion = TkinterDnD._require(self)
         else:
             super().__init__(fg_color=self.C("bg"))
-        self.title(APP_NAME)
+        self.title(f"{APP_NAME} {APP_VERSION}")
         self.geometry(saved.get("geometry") or "1180x780")
         self.minsize(720, 520)
         self.resizable(True, True)
@@ -277,6 +289,7 @@ class FileSystemWrapper(_WindowBase):
         self.history = []
         self.last_reply = ""
         self._transcript = []
+        self._image_records = []
         self._live_box = None
         self._last_assistant_label = None
         self._continuing = False
@@ -4272,6 +4285,7 @@ class FileSystemWrapper(_WindowBase):
         for child in self.chat.winfo_children():
             child.destroy()
         self._transcript = []
+        self._image_records = []
         self.last_reply = ""
         self._live_box = None
         self._last_assistant_label = None
@@ -5075,7 +5089,53 @@ class FileSystemWrapper(_WindowBase):
         self._set_status("Génération impossible")
 
     def _add_image_card(self, result):
-        """Carte de résultat dans la conversation : aperçu, légende, actions."""
+        """Carte de résultat : copie durable dans %APPDATA%, puis affichage."""
+        record = self._remember_image(result)
+        caption = record["caption"] if record else self._image_caption(result)
+        if self._build_image_card(result) is None:
+            return
+        self._transcript.append(["image", caption])
+        self._scroll_chat()
+
+    def _remember_image(self, result):
+        """Copie l'image hors du dossier de travail pour la retrouver plus tard."""
+        dossier = images_dir()
+        nom = (
+            f"{str(self._chat_id)[:8]}-{len(self._image_records) + 1:02d}"
+            f"{lumio_image.extension_for(result['data'])}"
+        )
+        try:
+            (dossier / nom).write_bytes(result["data"])
+        except OSError:
+            return None
+        record = {
+            "caption": self._image_caption(result),
+            "file": nom,
+            "prompt": result.get("prompt", ""),
+            "model": result.get("model", ""),
+            "provider": result.get("provider", ""),
+            "width": result.get("width"),
+            "height": result.get("height"),
+            "steps": result.get("steps"),
+            "seconds": result.get("seconds"),
+            "kudos": result.get("kudos", 0.0),
+        }
+        self._image_records.append(record)
+        return record
+
+    def _restore_image_card(self, record):
+        """Remet la carte d'une conversation rouverte (image relue du disque)."""
+        chemin = images_dir() / str(record.get("file") or "")
+        try:
+            data = chemin.read_bytes()
+        except OSError:
+            self._add_bubble("notice", f"Image introuvable : {record.get('caption', '')}")
+            return
+        self._build_image_card({**record, "data": data})
+        self._image_records.append(record)
+
+    def _build_image_card(self, result):
+        """Construit la carte elle-même (aucune écriture, aucune trace)."""
         self._hide_chat_empty()
         try:
             _picture, ctk_image = self._image_picture(result["data"], 360, 200)
@@ -5125,8 +5185,6 @@ class FileSystemWrapper(_WindowBase):
         regenerer.pack(side="left", padx=(8, 0))
         for bouton in (enregistrer, joindre, regenerer):
             self._role(bouton, "btn_soft")
-        self._transcript.append(["notice", f"Image générée — {self._image_caption(result)}"])
-        self._scroll_chat()
         return card
 
     def _save_image_result(self, result=None):
@@ -5405,6 +5463,9 @@ class FileSystemWrapper(_WindowBase):
             "transcript": self._chat_snapshot(),
             "last_reply": self.last_reply,
             "pending_question": self._pending_question,
+            # Les images générées sont copiées dans %APPDATA%\Lumio\images :
+            # la conversation les retrouve à la réouverture.
+            "images": list(self._image_records),
             # Mémorise le modèle qui a produit la conversation : sans ça, on la
             # rouvre plus tard avec un autre modèle sans s'en apercevoir.
             "model": self._current_model() or self._model_by_provider.get(self._backend()) or "",
@@ -6366,7 +6427,7 @@ class FileSystemWrapper(_WindowBase):
     def _chat_snapshot(self):
         rows = []
         for role, text in self._transcript:
-            if role not in {"user", "assistant"}:
+            if role not in {"user", "assistant", "image"}:
                 continue
             body = str(text or "").strip()
             if body and body != "…":
@@ -6386,6 +6447,7 @@ class FileSystemWrapper(_WindowBase):
                 "transcript": current.get("transcript") or saved.get("transcript"),
                 "last_reply": current.get("last_reply", saved.get("last_reply")),
                 "pending_question": current.get("pending_question", saved.get("pending_question")),
+                "images": current.get("images") or saved.get("images"),
             }
         history = saved.get("history") if isinstance(saved.get("history"), list) else []
         transcript = saved.get("transcript") if isinstance(saved.get("transcript"), list) else []
@@ -6410,11 +6472,22 @@ class FileSystemWrapper(_WindowBase):
         if not transcript:
             self._set_apply_state()
             return
+        images = {
+            str(record.get("caption") or ""): record
+            for record in (saved.get("images") or [])
+            if isinstance(record, dict) and record.get("file")
+        }
+        self._image_records = []
         for item in transcript[-MAX_TRANSCRIPT:]:
             if not isinstance(item, dict):
                 continue
             role = item.get("role")
             content = str(item.get("content") or "")
+            if role == "image":
+                record = images.get(content)
+                if record:
+                    self._restore_image_card(record)
+                continue
             if role in {"user", "assistant"} and content:
                 self._add_bubble(role, content)
         self._set_apply_state()

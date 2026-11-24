@@ -171,7 +171,8 @@ recherche active déplie automatiquement les branches concernées.
 | `%APPDATA%\Lumio\session.json` | session, conversations, réglages (clé API chiffrée DPAPI) |
 | `%APPDATA%\Lumio\usage.jsonl` | une ligne par échange (tokens, coût) |
 | `%APPDATA%\Lumio\snapshots\` | versions archivées avant écriture |
-| `lumio_error.log` | dernière erreur (à côté de `gui_tool.py`) |
+| `%APPDATA%\Lumio\images\` | images générées, pour les retrouver à la réouverture |
+| `%APPDATA%\Lumio\lumio_error.log` | dernière erreur |
 
 Lumio ne s'ouvre pas ? Regarde `lumio_error.log` : toute erreur y est écrite et
 affichée dans une boîte de dialogue.
