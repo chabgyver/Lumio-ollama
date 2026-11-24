@@ -2,8 +2,7 @@
 rem ============================================================
 rem  Lumio - lanceur unique
 rem    1. Ollama      (obligatoire)
-rem    2. PrivateGPT  (optionnel : ignore s'il est absent)
-rem    3. Lumio
+rem    2. Lumio
 rem
 rem  Les chemins passes a pythonw restent en UNC (%~dp0) : un lecteur
 rem  temporaire cree par pushd serait demonte avant que l'appli demarre.
@@ -13,10 +12,6 @@ setlocal EnableExtensions
 
 set "APP=%~dp0gui_tool.py"
 set "OLLAMA_EXE=%LOCALAPPDATA%\Programs\Ollama\ollama.exe"
-rem PrivateGPT est optionnel : surchargez le dossier avec LUMIO_PGPT_DIR.
-if not defined LUMIO_PGPT_DIR set "LUMIO_PGPT_DIR=D:\private-gpt-main"
-set "PGPT_DIR=%LUMIO_PGPT_DIR%"
-set "PGPT_EXE=%PGPT_DIR%\.venv\Scripts\private-gpt.exe"
 
 if not exist "%APP%" (
     echo Lumio est introuvable :
@@ -40,7 +35,7 @@ if exist "%PYDIR%pythonw.exe" set "PYW=%PYDIR%pythonw.exe"
 echo Python : "%PY%"
 
 echo.
-echo [1/3] Ollama...
+echo [1/2] Ollama...
 call :ensure_http "http://127.0.0.1:11434/api/tags"
 if errorlevel 1 (
     if exist "%OLLAMA_EXE%" (
@@ -63,26 +58,7 @@ if errorlevel 1 (
 )
 echo       pret.
 
-echo [2/3] PrivateGPT ^(optionnel^)...
-if not exist "%PGPT_EXE%" (
-    echo       absent - ignore.
-    goto pgpt_done
-)
-call :ensure_http "http://127.0.0.1:8080/health"
-if not errorlevel 1 (
-    echo       pret.
-    goto pgpt_done
-)
-start "PrivateGPT" /min /d "%PGPT_DIR%" "%PGPT_EXE%" serve
-call :wait_http "http://127.0.0.1:8080/health" 20 "PrivateGPT"
-if errorlevel 1 (
-    echo       ne repond pas - Lumio demarre quand meme ^(moteur Ollama^).
-) else (
-    echo       pret.
-)
-:pgpt_done
-
-echo [3/3] Lumio...
+echo [2/2] Lumio...
 "%PY%" -c "import customtkinter" 1>nul 2>nul
 if errorlevel 1 (
     echo       installation de customtkinter...

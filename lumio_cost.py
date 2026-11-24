@@ -59,7 +59,7 @@ def make_entry(model, provider, usage, price=None, when=None) -> dict:
     usage = usage or {}
     prompt = int(usage.get("prompt_tokens") or 0)
     completion = int(usage.get("completion_tokens") or 0)
-    local = str(provider or "").strip().casefold() in {"local", "ollama", "pgpt"}
+    local = str(provider or "").strip().casefold() in {"local", "ollama"}
     cost = 0.0 if local else cost_usd(prompt, completion, (price or {}).get("prompt"),
                                       (price or {}).get("completion"))
     return {

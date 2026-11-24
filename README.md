@@ -174,7 +174,7 @@ Ils tournent sur Windows (`windows-latest`) dans la CI GitHub Actions.
 | Module | Rôle |
 |---|---|
 | `gui_tool.py` | interface (Tkinter / CustomTkinter) |
-| `ollama_fs_access.py` | moteur : fichiers, contexte, flux Ollama / OpenAI / PrivateGPT / AI Horde, catalogue |
+| `ollama_fs_access.py` | moteur : fichiers, contexte, flux Ollama / OpenAI / AI Horde, catalogue |
 | `lumio_image.py` | génération d'images (Ollama local, AI Horde) |
 | `lumio_session.py` | session, chiffrement DPAPI, migration |
 | `lumio_search.py` | recherche dans les conversations |

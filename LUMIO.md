@@ -1,11 +1,12 @@
 # Lumio — compagnon d'Ollama
 
 Assistant de bureau pour travailler sur **un dossier** avec un modèle local (Ollama),
-un modèle en ligne (OpenRouter, Groq, DeepSeek…) ou PrivateGPT.
+un modèle en ligne (OpenRouter, Groq, DeepSeek…) ou les modèles communautaires
+d'AI Horde.
 
 Double-clique `Lumio.bat` : au premier lancement, Lumio crée lui-même le
-raccourci `Lumio.lnk`. Le lanceur démarre Ollama, PrivateGPT s'il est présent,
-puis l'interface. Une seule instance à la fois.
+raccourci `Lumio.lnk`. Le lanceur démarre Ollama, puis l'interface. Une seule
+instance à la fois.
 
 ## Ce que Lumio sait faire
 
@@ -189,7 +190,7 @@ instantanés, outils, routage, vérification, prompt et file d'attente AI Horde.
 | Module | Rôle |
 |---|---|
 | `gui_tool.py` | interface (Tkinter / CustomTkinter) |
-| `ollama_fs_access.py` | moteur : fichiers, contexte, flux Ollama / OpenAI / PrivateGPT / AI Horde, catalogue |
+| `ollama_fs_access.py` | moteur : fichiers, contexte, flux Ollama / OpenAI / AI Horde, catalogue |
 | `lumio_session.py` | session, chiffrement DPAPI, migration |
 | `lumio_search.py` | recherche dans les conversations |
 | `lumio_cost.py` | tokens, coût, journal, budgets |

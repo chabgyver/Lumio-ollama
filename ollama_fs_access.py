@@ -15,11 +15,9 @@ from pathlib import Path
 
 
 OLLAMA_URL = "http://127.0.0.1:11434"
-PGPT_URL = "http://127.0.0.1:8080"
-PROVIDERS = ("ollama", "pgpt", "online", "horde")
+PROVIDERS = ("ollama", "online", "horde")
 PROVIDER_LABELS = {
     "ollama": "Ollama",
-    "pgpt": "PrivateGPT",
     "online": "En ligne",
     "horde": "AI Horde",
 }
@@ -363,13 +361,9 @@ def normalize_provider(name):
         return "online"
     if key in {"horde", "aihorde", "ai-horde", "kobold", "hordeai"}:
         return "horde"
-    if key in {"pgpt", "privategpt", "private-gpt", "workbench"}:
-        return "pgpt"
+    # « pgpt » / « privategpt » retombent sur Ollama : les sessions enregistrées
+    # avant le retrait de PrivateGPT restent donc lisibles.
     return "ollama"
-
-
-def pgpt_base():
-    return str(os.environ.get("LUMIO_PGPT_URL") or PGPT_URL).strip().rstrip("/")
 
 
 def provider_label(name):
@@ -1039,11 +1033,6 @@ def pick_listed_model(names, saved="", provider="ollama"):
     if key == "horde":
         # La liste Horde est déjà triée : liberté, puis taille.
         return names[0] if names else ""
-    if key == "pgpt":
-        for token in ("coder", "qwen", "instruct"):
-            for name in names:
-                if token in name.casefold():
-                    return name
     return names[0] if names else ""
 
 
@@ -1137,34 +1126,12 @@ def list_online_models():
     return names
 
 
-def list_pgpt_models():
-    request = urllib.request.Request(
-        f"{pgpt_base()}/v1/models",
-        headers={"Accept": "application/json"},
-    )
-    with urllib.request.urlopen(request, timeout=8) as response:
-        data = json.loads(response.read().decode("utf-8"))
-    raw = data.get("data") if isinstance(data, dict) else data
-    names = []
-    for item in raw or []:
-        if isinstance(item, str):
-            name = item
-        else:
-            name = (item or {}).get("id") or (item or {}).get("display_name") or ""
-        name = str(name).strip()
-        if name and name not in names:
-            names.append(name)
-    return names
-
-
 def list_models(provider="ollama"):
     key = normalize_provider(provider)
     if key == "online":
         return list_online_models()
     if key == "horde":
         return list_horde_models()
-    if key == "pgpt":
-        return list_pgpt_models()
     request = urllib.request.Request(f"{OLLAMA_URL}/api/tags")
     with urllib.request.urlopen(request, timeout=4) as response:
         data = json.loads(response.read().decode("utf-8"))
@@ -1177,18 +1144,6 @@ def ollama_up():
         return True
     except Exception:
         return False
-
-
-def pgpt_up():
-    try:
-        urllib.request.urlopen(f"{pgpt_base()}/health", timeout=2)
-        return True
-    except Exception:
-        try:
-            urllib.request.urlopen(f"{pgpt_base()}/v1/models", timeout=3)
-            return True
-        except Exception:
-            return False
 
 
 def online_up():
@@ -1211,8 +1166,6 @@ def backend_up(provider="ollama"):
         return online_up()
     if key == "horde":
         return horde_up()
-    if key == "pgpt":
-        return pgpt_up()
     return ollama_up()
 
 
@@ -1462,18 +1415,11 @@ def explain_backend_error(error, images=False, provider="ollama"):
             return f"{label} n'est pas joignable. Vérifiez l'URL et votre connexion Internet."
         if key == "horde":
             return f"{label} n'est pas joignable. Vérifiez votre connexion Internet."
-        if key == "pgpt":
-            return (
-                "PrivateGPT n'est pas lancé. Ouvrez le workbench "
-                "(http://127.0.0.1:8080/ui/), puis réessayez."
-            )
         return "Ollama n'est pas lancé. Ouvrez Ollama, attendez qu'il soit prêt, puis cliquez sur Modèles."
     if key == "online":
         return f"{label} ne répond pas ({error})"
     if key == "horde":
         return f"{label} ne répond pas ({error}). Vérifiez votre connexion Internet."
-    if key == "pgpt":
-        return f"{label} ne répond pas sur 127.0.0.1:8080 ({error})"
     return f"Ollama ne répond pas sur 127.0.0.1:11434 ({error})"
 
 
@@ -2308,160 +2254,6 @@ def read_openai_stream(url, payload, on_delta=None, on_thinking=None, on_open=No
     return "".join(parts)
 
 
-def parse_pgpt_event(event_name, data):
-    if not isinstance(data, dict):
-        return "", "", False
-    kind = str(event_name or data.get("type") or "")
-    delta = data.get("delta") if isinstance(data.get("delta"), dict) else {}
-    piece = ""
-    thinking = ""
-    dtype = str(delta.get("type") or "")
-    if dtype in {"text_delta", "text"} or "text" in delta:
-        if dtype not in {"thinking_delta", "reasoning_delta"}:
-            piece = str(delta.get("text") or "")
-    if dtype in {"thinking_delta", "reasoning_delta"} or delta.get("thinking"):
-        thinking = str(delta.get("thinking") or delta.get("text") or "")
-    done = kind in {"message_stop", "error"} or data.get("type") in {"message_stop", "error"}
-    return piece, thinking, done
-
-
-def read_pgpt_stream(payload, on_delta=None, on_thinking=None, on_open=None, cancel_event=None, timeout=600, on_stats=None):
-    request = urllib.request.Request(
-        f"{pgpt_base()}/v1/messages",
-        data=json.dumps(payload).encode("utf-8"),
-        headers={
-            "Content-Type": "application/json",
-            "Accept": "text/event-stream",
-        },
-    )
-    parts = []
-    response = None
-    last_stats = ""
-    try:
-        response = urllib.request.urlopen(request, timeout=timeout)
-        if on_open is not None:
-            on_open(response)
-        if cancel_event is not None and cancel_event.is_set():
-            return ""
-        buffer = ""
-        event_name = ""
-        for raw in response:
-            if cancel_event is not None and cancel_event.is_set():
-                break
-            buffer += raw.decode("utf-8", errors="replace")
-            while "\n" in buffer:
-                line, buffer = buffer.split("\n", 1)
-                line = line.strip()
-                if not line:
-                    event_name = ""
-                    continue
-                if line.startswith("event:"):
-                    event_name = line[6:].strip()
-                    continue
-                if line.startswith("data:"):
-                    payload_line = line[5:].strip()
-                else:
-                    payload_line = line
-                if not payload_line or payload_line == "[DONE]":
-                    continue
-                try:
-                    data = json.loads(payload_line)
-                except json.JSONDecodeError:
-                    continue
-                usage = data.get("usage") if isinstance(data, dict) else None
-                if usage:
-                    bits = []
-                    inn = int(usage.get("input_tokens") or 0)
-                    out = int(usage.get("output_tokens") or 0)
-                    if inn:
-                        bits.append(f"{inn} ctx")
-                    if out:
-                        bits.append(f"{out} tok")
-                    if bits:
-                        last_stats = " · ".join(bits)
-                piece, thinking, done = parse_pgpt_event(event_name, data)
-                if thinking and on_thinking is not None:
-                    on_thinking(thinking)
-                if piece:
-                    parts.append(piece)
-                    if on_delta is not None:
-                        on_delta(piece)
-                if done:
-                    break
-        if on_stats is not None and last_stats:
-            on_stats(last_stats)
-    finally:
-        close_http(response)
-    return "".join(parts)
-
-
-def _pgpt_chat_payload(model, question, context, history=None, attach_files=True):
-    messages, user = _chat_messages(question, context, history, attach_files)
-    messages.append({"role": "user", "content": user})
-    system_parts = []
-    rows = []
-    for item in messages:
-        role = str((item or {}).get("role") or "")
-        content = (item or {}).get("content")
-        if isinstance(content, list):
-            bits = []
-            for part in content:
-                if isinstance(part, dict) and part.get("text"):
-                    bits.append(str(part.get("text")))
-                elif isinstance(part, str):
-                    bits.append(part)
-            content = "\n".join(bits)
-        text = str(content or "")
-        if role == "system":
-            if text.strip():
-                system_parts.append(text)
-            continue
-        if role in {"user", "assistant"} and text:
-            rows.append({"role": role, "content": text})
-    payload = {
-        "model": model,
-        "messages": rows,
-        "max_tokens": 8192,
-        "stream": True,
-        "temperature": 0.3,
-    }
-    if system_parts:
-        payload["system"] = "\n\n".join(system_parts)
-    return payload
-
-
-def ask_pgpt(model, question, context, history=None, on_delta=None, on_open=None, cancel_event=None, attach_files=True, images=None, on_notice=None, on_thinking=None, on_stats=None):
-    images = [item for item in (images or []) if item]
-    if not str(model).strip():
-        raise RuntimeError("Aucun modèle PrivateGPT sélectionné")
-    if not str(question).strip() and not images:
-        raise RuntimeError("Question vide")
-    if not pgpt_up():
-        raise RuntimeError(
-            "PrivateGPT n'est pas lancé. Ouvrez le workbench "
-            "(http://127.0.0.1:8080/ui/), attendez qu'il soit prêt, puis cliquez sur Actualiser."
-        )
-    if images:
-        if on_notice is not None:
-            on_notice("PrivateGPT : la capture n'est pas envoyée pour l'instant, seul le texte l'est.")
-    payload = _pgpt_chat_payload(model, question, context, history, attach_files)
-    try:
-        return read_pgpt_stream(
-            payload,
-            on_delta=on_delta,
-            on_thinking=on_thinking,
-            on_open=on_open,
-            cancel_event=cancel_event,
-            on_stats=on_stats,
-        )
-    except Exception as error:
-        if cancel_event is not None and cancel_event.is_set():
-            return ""
-        if isinstance(error, urllib.error.URLError):
-            raise RuntimeError(explain_backend_error(error, provider="pgpt")) from error
-        raise
-
-
 _PYTHON_ENV_CACHE = {"text": "", "at": 0.0}
 
 _ENV_PACKAGES = (
@@ -2982,12 +2774,6 @@ def ask_ollama(model, question, context, history=None, on_delta=None, on_open=No
             model, question, context, history=history, on_delta=on_delta, on_open=on_open,
             cancel_event=cancel_event, attach_files=attach_files, images=images,
             on_notice=on_notice, on_progress=on_progress, on_thinking=on_thinking, on_stats=on_stats,
-        )
-    if key == "pgpt":
-        return ask_pgpt(
-            model, question, context, history=history, on_delta=on_delta, on_open=on_open,
-            cancel_event=cancel_event, attach_files=attach_files, images=images,
-            on_notice=on_notice, on_thinking=on_thinking, on_stats=on_stats,
         )
     images = [item for item in (images or []) if item]
     if not str(model).strip():

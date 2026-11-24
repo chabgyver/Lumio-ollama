@@ -207,5 +207,21 @@ class CatalogueTests(unittest.TestCase):
         self.assertTrue(row["free"])
 
 
+class FournisseursTests(unittest.TestCase):
+    """PrivateGPT a été retiré (bloqué par Windows) : deux garde-fous."""
+
+    def test_plus_de_private_gpt(self):
+        self.assertNotIn("pgpt", ox.PROVIDERS)
+        self.assertEqual(
+            [ox.provider_label(item) for item in ox.PROVIDERS],
+            ["Ollama", "En ligne", "AI Horde"],
+        )
+
+    def test_session_ancienne_retombe_sur_ollama(self):
+        self.assertEqual(ox.normalize_provider("PrivateGPT"), "ollama")
+        self.assertEqual(ox.normalize_provider("pgpt"), "ollama")
+        self.assertEqual(ox.normalize_provider("workbench"), "ollama")
+
+
 if __name__ == "__main__":
     unittest.main()

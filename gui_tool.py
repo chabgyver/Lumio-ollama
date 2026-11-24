@@ -366,7 +366,6 @@ class FileSystemWrapper(_WindowBase):
         self.provider = ollama_fs_access.normalize_provider(saved.get("provider") or "ollama")
         self._model_by_provider = {
             "ollama": str(saved.get("ollama_model") or (saved.get("model") if self.provider == "ollama" else "") or ""),
-            "pgpt": str(saved.get("pgpt_model") or ""),
             "online": str(saved.get("online_model") or ""),
             "horde": str(saved.get("horde_model") or ""),
         }
@@ -640,7 +639,7 @@ class FileSystemWrapper(_WindowBase):
         controls.grid(row=3, column=0, columnspan=4, sticky="ew", pady=(8, 0))
         self.provider_box = self._styled(
             ctk.CTkComboBox(
-                controls, values=["Ollama", "PrivateGPT", "En ligne", "AI Horde"], width=150, height=36, corner_radius=10,
+                controls, values=["Ollama", "En ligne", "AI Horde"], width=150, height=36, corner_radius=10,
                 font=self.font_small, command=self._on_provider,
             ),
             "combo",
@@ -1046,8 +1045,6 @@ class FileSystemWrapper(_WindowBase):
             extra = " · En ligne"
         elif self._backend() == "horde":
             extra = " · AI Horde"
-        elif self._backend() == "pgpt":
-            extra = " · PrivateGPT"
         if getattr(self, "ollama_state", None) is not None:
             tag = ollama_fs_access.model_coding_tag(choice)
             level = ollama_fs_access.freedom_level(choice)
@@ -1075,9 +1072,7 @@ class FileSystemWrapper(_WindowBase):
             pass
         self._model_picker = dialog
         hint = (
-            "Modèles PrivateGPT locaux. Lumio envoie le dossier et écrit les fichiers."
-            if self._backend() == "pgpt"
-            else "Uniquement les modèles uncensored capables de coder (Dolphin 24B, Magnum, Euryale…)."
+            "Uniquement les modèles uncensored capables de coder (Dolphin 24B, Magnum, Euryale…)."
             if self._backend() == "online"
             else "Modèles communautaires AI Horde : gratuits, en file d'attente, sans téléchargement."
             if self._backend() == "horde"
@@ -1162,12 +1157,8 @@ class FileSystemWrapper(_WindowBase):
             names = self._visible_models(search_var.get())
             if not names:
                 empty = (
-                    "Aucun modèle PrivateGPT. Lancez le workbench puis Actualiser."
-                    if self._backend() == "pgpt"
-                    else (
-                        f"Aucun modèle « {ollama_fs_access.model_filter_label(self.model_filter)} » "
-                        "dans cette liste : choisissez « Tous » ou Actualisez."
-                    )
+                    f"Aucun modèle « {ollama_fs_access.model_filter_label(self.model_filter)} » "
+                    "dans cette liste : choisissez « Tous » ou Actualisez."
                 )
                 self._styled(
                     ctk.CTkLabel(
@@ -2370,7 +2361,6 @@ class FileSystemWrapper(_WindowBase):
             ("Catalogue de modèles en ligne", "", self.browse_catalog),
             ("Revenir au modèle de la conversation", "", self.restore_chat_model),
             ("Moteur : Ollama", "", lambda: self._on_provider("Ollama")),
-            ("Moteur : PrivateGPT", "", lambda: self._on_provider("PrivateGPT")),
             ("Moteur : En ligne", "", lambda: self._on_provider("En ligne")),
             ("Moteur : AI Horde (gratuit, abliterated)", "", lambda: self._on_provider("AI Horde")),
             ("Clé API en ligne", "", self.edit_online_api),
@@ -3133,11 +3123,10 @@ class FileSystemWrapper(_WindowBase):
         self.after(120_000, self._warm_ollama)
 
     def _refresh_services(self):
-        """Voyants Ollama / PrivateGPT / clé en ligne, vérifiés en arrière-plan."""
+        """Voyants Ollama / clé en ligne, vérifiés en arrière-plan."""
         def work():
             states = (
                 ollama_fs_access.ollama_up(),
-                ollama_fs_access.pgpt_up(),
                 bool(ollama_fs_access.online_config().get("key")),
             )
             self._bg_events.put(("services", states))
@@ -3149,15 +3138,14 @@ class FileSystemWrapper(_WindowBase):
         label = getattr(self, "services_state", None)
         if label is None:
             return
-        ollama_ok, pgpt_ok, has_key = states
+        ollama_ok, has_key = states
         text = "  ·  ".join(
             (
                 f"Ollama {'✓' if ollama_ok else '✗'}",
-                f"PrivateGPT {'✓' if pgpt_ok else '✗'}",
                 f"clé {'✓' if has_key else '✗'}",
             )
         )
-        up = {"ollama": ollama_ok, "pgpt": pgpt_ok, "online": has_key}.get(self._backend(), False)
+        up = {"ollama": ollama_ok, "online": has_key}.get(self._backend(), False)
         label.configure(text=text)
         self._paint(label, "sage" if up else "danger")
 
@@ -6100,13 +6088,6 @@ class FileSystemWrapper(_WindowBase):
                         "Le service en ligne ne répond pas.\n\n"
                         "Vérifiez l'URL, la clé API et votre connexion Internet, puis ouvrez « Choisir un modèle ».",
                     )
-            elif self._backend() == "pgpt":
-                messagebox.showerror(
-                    APP_NAME,
-                    "PrivateGPT n'est pas lancé.\n\n"
-                    "Ouvrez le workbench (http://127.0.0.1:8080/ui/), "
-                    "attendez qu'il soit prêt, puis cliquez sur Choisir un modèle.",
-                )
             elif self._backend() == "horde":
                 messagebox.showerror(
                     APP_NAME,
@@ -6348,8 +6329,6 @@ class FileSystemWrapper(_WindowBase):
             if provider == "ollama":
                 window = ollama_fs_access.model_window_label(pick)
                 extra = f" · {window}" if window else ""
-            elif provider == "pgpt":
-                extra = " · PrivateGPT"
             elif provider == "horde":
                 extra = " · AI Horde"
             else:
@@ -6468,7 +6447,6 @@ class FileSystemWrapper(_WindowBase):
             "model_filter_custom": bool(getattr(self, "_filter_custom", False)),
             "model_family": self.model_family,
             "ollama_model": self._model_by_provider.get("ollama") or "",
-            "pgpt_model": self._model_by_provider.get("pgpt") or "",
             "online_model": self._model_by_provider.get("online") or "",
             "horde_model": self._model_by_provider.get("horde") or "",
             "horde_key": ollama_fs_access.horde_config().get("key") or "",
