@@ -40,6 +40,7 @@ import lumio_rank
 import lumio_router
 import lumio_search
 import lumio_session
+import lumio_ui_costs
 import lumio_ui_versions
 import lumio_tree
 import lumio_snapshots
@@ -3154,54 +3155,8 @@ class FileSystemWrapper(_WindowBase):
         return entry
 
     def usage_stats(self):
-        """Panneau « Coût et tokens » (7 derniers jours, par modèle)."""
-        lines = lumio_cost.summary_lines(days=7)
-        dialog = ctk.CTkToplevel(self)
-        dialog.title("Coût et tokens")
-        dialog.geometry("620x480")
-        dialog.minsize(480, 320)
-        dialog.configure(fg_color=self.C("bg"))
-        dialog.transient(self)
-        try:
-            dialog.grab_set()
-        except Exception:
-            pass
-
-        ctk.CTkLabel(
-            dialog, text="Coût et tokens", text_color=self.C("text"),
-            font=self.font_heading, anchor="w",
-        ).pack(fill="x", padx=16, pady=(14, 4))
-        self._styled(
-            ctk.CTkLabel(
-                dialog,
-                text="Tarifs du catalogue, par million de tokens. Les modèles locaux ne coûtent rien.",
-                font=self.font_tiny, anchor="w", justify="left", wraplength=560,
-            ),
-            "muted",
-        ).pack(fill="x", padx=16, pady=(0, 8))
-
-        box = self._styled(
-            ctk.CTkTextbox(dialog, font=ctk.CTkFont(family="Consolas", size=12), wrap="word"),
-            "textbox",
-        )
-        box.pack(fill="both", expand=True, padx=16, pady=(0, 8))
-        box.insert("1.0", "\n".join(lines))
-        box.configure(state="disabled")
-
-        bar = ctk.CTkFrame(dialog, fg_color="transparent")
-        bar.pack(fill="x", padx=16, pady=(0, 14))
-
-        def open_ledger():
-            try:
-                os.startfile(lumio_cost.ledger_path().parent)  # type: ignore[attr-defined]
-            except Exception as exc:
-                self._set_status(f"Dossier introuvable : {exc}")
-
-        self._button(bar, "Ouvrir le dossier", open_ledger, width=150).pack(side="left")
-        self._button(bar, "Fermer", lambda: dialog.destroy(), primary=True).pack(side="right")
-        dialog.bind("<Escape>", lambda _event: dialog.destroy())
-        dialog.protocol("WM_DELETE_WINDOW", lambda: dialog.destroy())
-        self.wait_window(dialog)
+        """Panneau « Cout et tokens » (voir lumio_ui_costs.py)."""
+        lumio_ui_costs.show(self)
 
     def _on_escape(self, _event=None):
         if self._streaming:
