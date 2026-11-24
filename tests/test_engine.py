@@ -93,10 +93,75 @@ class ModelesTests(unittest.TestCase):
         self.assertTrue(ox.is_uncensored_model("cognitivecomputations/dolphin3.0-mistral-24b"))
         self.assertFalse(ox.is_uncensored_model("qwen2.5-coder:7b"))
 
+    def test_niveaux_de_liberte(self):
+        self.assertEqual(ox.freedom_level("robit/qwen3.8-27b-e03-obliterated-omni"), "obliterated")
+        self.assertEqual(ox.freedom_level("huihui-ai/Qwen2.5-7B-Instruct-abliterated"), "abliterated")
+        self.assertEqual(
+            ox.freedom_level("cognitivecomputations/dolphin3.0-mistral-24b"), "uncensored"
+        )
+        self.assertEqual(ox.freedom_level("qwen2.5-coder:7b"), "")
+        self.assertEqual(ox.freedom_level(""), "")
+
+    def test_obliterated_est_aussi_uncensored(self):
+        self.assertTrue(ox.is_uncensored_model("robit/qwen3.8-27b-e03-obliterated-omni"))
+        self.assertTrue(ox.is_obliterated_model("x/qwen3-27b-liberated"))
+        self.assertFalse(ox.is_obliterated_model("x/qwen2.5-abliterated"))
+
+    def test_etiquettes(self):
+        self.assertIn("obliterated", ox.freedom_tag("a/b-obliterated"))
+        self.assertIn("abliterated", ox.freedom_tag("a/b-abliterated"))
+        self.assertEqual(ox.freedom_tag("qwen2.5-coder:7b"), "")
+
+    def test_filtres(self):
+        names = [
+            "qwen2.5-coder:7b",
+            "cognitivecomputations/dolphin3.0-mistral-24b",
+            "huihui/qwen2.5-7b-abliterated",
+            "robit/qwen3.8-27b-obliterated-omni",
+        ]
+        self.assertEqual(len(ox.filter_models(names, kind="all")), 4)
+        self.assertEqual(
+            ox.filter_models(names, kind="obliterated"),
+            ["robit/qwen3.8-27b-obliterated-omni"],
+        )
+        self.assertEqual(
+            ox.filter_models(names, kind="abliterated"),
+            ["huihui/qwen2.5-7b-abliterated", "robit/qwen3.8-27b-obliterated-omni"],
+        )
+        self.assertEqual(len(ox.filter_models(names, kind="uncensored")), 3)
+        self.assertEqual(ox.filter_models(names, kind="libre"), ox.filter_models(names, kind="uncensored"))
+        self.assertEqual(ox.filter_models(names, kind="inconnu"), names)
+
+    def test_normalisation_et_comptes(self):
+        self.assertEqual(ox.normalize_model_filter("Obliterated"), "obliterated")
+        self.assertEqual(ox.normalize_model_filter("libre"), "uncensored")
+        self.assertEqual(ox.normalize_model_filter(""), "all")
+        counts = ox.freedom_counts(
+            ["a/x-obliterated", "b/y-abliterated", "c/z-uncensored", "d/w"]
+        )
+        self.assertEqual(
+            counts, {"obliterated": 1, "abliterated": 1, "uncensored": 1, "aligned": 1}
+        )
+        self.assertIn("1 obliterated", ox.freedom_summary(counts))
+
     def test_filter_models(self):
         names = ["qwen2.5-coder:7b", "cognitivecomputations/dolphin3.0-mistral-24b"]
         self.assertEqual(len(ox.filter_models(names, kind="uncensored")), 1)
         self.assertEqual(ox.filter_models(names, kind="all", family="qwen2.5"), ["qwen2.5-coder:7b"])
+
+    def test_taille_lue_dans_le_nom(self):
+        self.assertEqual(ox.model_size_billions("qwen2.5-coder:7b"), 7.0)
+        self.assertEqual(ox.model_size_billions("qwen3.8-27b-obliterated"), 27.0)
+        self.assertEqual(ox.model_size_billions("gemma-1.5b"), 1.5)
+        self.assertIsNone(ox.model_size_billions("llama3.1:latest"))
+
+    def test_faible_codeur_ne_confond_pas_27b_et_7b(self):
+        self.assertTrue(ox.is_weak_coder("qwen2.5:7b"))
+        self.assertTrue(ox.is_weak_coder("mythomax-l2-13b"))
+        self.assertFalse(ox.is_weak_coder("robit/qwen3.8-27b-e03-obliterated-omni"))
+        self.assertFalse(ox.is_weak_coder("huihui/qwen2.5-32b-abliterated"))
+        self.assertFalse(ox.is_weak_coder("qwen2.5-coder:7b"))
+        self.assertFalse(ox.is_weak_coder("cognitivecomputations/dolphin3.0-mistral-24b"))
 
     def test_list_model_families(self):
         rows = ox.list_model_families(["a/x", "a/y", "b/z"])
